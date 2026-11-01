@@ -31,3 +31,6 @@ type DurableObjectNamespace<
 
 /** Cloudflare Browser Rendering binding; keep runtime globals scoped. */
 type BrowserRun = import('@cloudflare/workers-types').BrowserRun
+
+/** Workers AI binding; the FAL extract calls AI Gateway through it. */
+type Ai = import('@cloudflare/workers-types').Ai

@@ -6,6 +6,9 @@
  * and the model poll stores those; this job still owns every other section.
  */
 import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { createAnthropicChat } from '@tanstack/ai-anthropic'
+import { cloudflareBindingFetch } from '@tanstack/ai-cloudflare'
+import { chat } from '@tanstack/ai'
 import { z } from 'zod'
 
 import { cardParams, verifyExamples } from '@modelschemas/rate-card'
@@ -66,10 +69,12 @@ export function falPricingExtractCursorKey(providerId = 'fal'): string {
   return `${FAL_PRICING_EXTRACT_CURSOR_KEY}:${providerId}`
 }
 
-/** Single extract model — fail-closed; never a second guess. */
-export const FAL_PRICING_EXTRACT_MODEL = 'grok-4-fast'
-
-const XAI_CHAT_URL = 'https://api.x.ai/v1/chat/completions'
+/**
+ * Single extract model — fail-closed; never a second guess. Picked by
+ * `scripts/compare-fal-extract-models.ts` (#550). Anthropic's id: the
+ * binding fetch prefixes `anthropic/` for the gateway.
+ */
+export const FAL_PRICING_EXTRACT_MODEL = 'claude-sonnet-5-5'
 
 const extractedBodySchema = rateCardSchema.omit({ source: true }).extend({
   expiresAt: z.iso.datetime().optional(),
@@ -101,7 +106,7 @@ export interface FalPricingExtractOutcome {
   error?: string
 }
 
-/** `{ error }` = no card this run, and why (xAI HTTP error or empty reply, a throw, or two rejections). */
+/** `{ error }` = no card this run, and why (gateway error or empty reply, a throw, or two rejections). */
 export type ExtractedCard = RateCard | 'unverified' | { error: string }
 
 export interface ExtractCardArgs {
@@ -118,6 +123,9 @@ export type FalLlmsFetchResult = string | null | { status: number }
 export interface FalPricingExtractDeps extends SyncDeps {
   fetchText?: (url: string) => Promise<FalLlmsFetchResult>
   extractCard?: (args: ExtractCardArgs) => Promise<ExtractedCard>
+  /** Workers AI binding + AI Gateway id; both unset = leftovers skipped. */
+  ai?: Ai
+  gatewayId?: string
   fetchCap?: number
   extractCap?: number
   providerId?: string
@@ -226,17 +234,6 @@ function logFetchFailure(
       status,
     }),
   )
-}
-
-function chatContent(data: unknown): string | null {
-  if (!isRecord(data)) return null
-  const choices = data.choices
-  if (!Array.isArray(choices)) return null
-  const first: unknown = choices[0]
-  if (!isRecord(first)) return null
-  const message = first.message
-  if (!isRecord(message) || typeof message.content !== 'string') return null
-  return message.content
 }
 
 function parseJsonObject(text: string): unknown {
@@ -358,34 +355,63 @@ export function checkExtractedCard(
   return card
 }
 
-type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
+export type ChatTurn = { role: 'user' | 'assistant'; content: string }
 
-async function grokChat(
-  apiKey: string,
-  messages: Array<ChatMessage>,
-): Promise<string | { error: string }> {
-  const response = await fetch(XAI_CHAT_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: FAL_PRICING_EXTRACT_MODEL,
-      temperature: 0,
-      response_format: { type: 'json_object' },
-      messages,
-    }),
+/** The model's reply to these turns after `EXTRACT_SYSTEM`; throws on error. */
+export type ExtractChat = (turns: Array<ChatTurn>) => Promise<string>
+
+/**
+ * The extract model through Cloudflare AI Gateway on Unified Billing: the
+ * TanStack AI Anthropic adapter, its requests sent over the `env.AI`
+ * binding (which authenticates, so no provider key). No temperature: Claude 5
+ * models 400 on it (`anthropic-features.ts`). A gateway or provider error
+ * throws.
+ */
+export function gatewayChat(
+  ai: Ai,
+  gatewayId: string,
+  model:
+    | typeof FAL_PRICING_EXTRACT_MODEL
+    | 'claude-haiku-5-5' = FAL_PRICING_EXTRACT_MODEL,
+): ExtractChat {
+  const bindingFetch = cloudflareBindingFetch({
+    binding: ai,
+    vendor: 'anthropic',
+    gateway: { id: gatewayId },
   })
-  if (!response.ok) {
-    const body = (await response.text()).slice(0, 200)
-    return { error: `xai ${response.status}: ${body}` }
-  }
-  return (
-    chatContent((await response.json()) as unknown) ?? {
-      error: 'xai reply has no message content',
+  // The Anthropic SDK reports a thrown fetch as a bare "Connection error."
+  // and drops the binding's error, so keep it and rethrow it as the cause.
+  let bindingError: unknown
+  const adapter = createAnthropicChat(model, 'cloudflare-binding', {
+    fetch: async (...args: Parameters<typeof bindingFetch>) => {
+      try {
+        const response = await bindingFetch(...args)
+        // A retry got through: an earlier throw is not this call's cause.
+        bindingError = undefined
+        return response
+      } catch (error) {
+        bindingError = error
+        throw error
+      }
+    },
+  })
+  const threadId = crypto.randomUUID()
+  return async (turns) => {
+    bindingError = undefined
+    try {
+      const { text } = await chat({
+        adapter,
+        threadId,
+        stream: false,
+        systemPrompts: [EXTRACT_SYSTEM],
+        messages: turns,
+      })
+      return text
+    } catch (error) {
+      if (bindingError === undefined) throw error
+      throw new Error(errorMessage(error), { cause: bindingError })
     }
-  )
+  }
 }
 
 /**
@@ -393,11 +419,10 @@ async function grokChat(
  * reason (same model — not a fallback). `{ error }` = no card this run; the
  * caller holds the cursor so the next shard retries it, and reports why.
  */
-export async function extractRateCardWithGrok(
-  args: ExtractCardArgs & { apiKey: string },
+export async function extractRateCard(
+  args: ExtractCardArgs & { chat: ExtractChat },
 ): Promise<ExtractedCard> {
-  const messages: Array<ChatMessage> = [
-    { role: 'system', content: EXTRACT_SYSTEM },
+  const turns: Array<ChatTurn> = [
     {
       role: 'user',
       content: extractUserPrompt(args.pricingText, args.requestProperties),
@@ -406,12 +431,11 @@ export async function extractRateCardWithGrok(
   try {
     let rejected = ''
     for (let turn = 0; turn < 2; turn++) {
-      const content = await grokChat(args.apiKey, messages)
-      if (typeof content !== 'string') return content
+      const content = await args.chat(turns)
       const checked = checkExtractedCard(content, args)
       if (checked === 'unverified' || !('error' in checked)) return checked
       rejected = checked.error
-      messages.push(
+      turns.push(
         { role: 'assistant', content },
         {
           role: 'user',
@@ -688,11 +712,12 @@ async function extractFalPricingScoped(
     cursor: null,
   }
 
-  const apiKey = deps.secrets.XAI_API_KEY
+  const { ai, gatewayId } = deps
   const extract =
     deps.extractCard ??
-    (apiKey
-      ? (args: ExtractCardArgs) => extractRateCardWithGrok({ ...args, apiKey })
+    (ai && gatewayId
+      ? (args: ExtractCardArgs) =>
+          extractRateCard({ ...args, chat: gatewayChat(ai, gatewayId) })
       : null)
 
   try {
@@ -940,7 +965,8 @@ async function extractFalPricingScoped(
     const failed = new Set<string>()
     const reasons = new Set<string>()
     if (leftovers.size > 0 && extract === null) {
-      outcome.skipped = 'XAI_API_KEY not set — leftovers skipped'
+      outcome.skipped =
+        'AI binding or AI_GATEWAY_ID not set — leftovers skipped'
     } else if (leftovers.size > 0 && extract !== null) {
       const groups = [...leftovers.entries()]
       const results = await mapLimit(

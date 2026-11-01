@@ -20,6 +20,8 @@ export const Route = createFileRoute('/v1/admin/extract/fal')({
           db: getDb(env),
           kv: env.SCHEMA_CACHE,
           secrets: env,
+          ai: env.AI,
+          gatewayId: env.AI_GATEWAY_ID,
         })
         if (outcome.error) {
           return jsonError(502, 'extract_failed', outcome.error)

@@ -7,6 +7,10 @@
   "vars": {
     // Agent JWT audiences are origin-bound.
     "BETTER_AUTH_URL": "https://modelschemas.com",
+    // FAL rate-card extract runs through this AI Gateway on Unified Billing
+    // (credits on the Cloudflare bill, no provider key). Created by hand in
+    // the dashboard.
+    "AI_GATEWAY_ID": "modelschemas",
   },
   "observability": {
     "enabled": true,
@@ -42,6 +46,9 @@
     // ~1,400 per-model specs in one run, which can exceed that. Ceiling,
     // not a floor — unused headroom costs nothing.
     "cpu_ms": 300000,
+  },
+  "ai": {
+    "binding": "AI",
   },
   "browser": {
     "binding": "BROWSER",

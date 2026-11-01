@@ -157,7 +157,10 @@ ones).
   model call, leftovers go to one extract model per distinct Pricing-section
   hash and are copied onto every row sharing it. A priced leftover must
   become a card (one repair turn, same model); a failed one rewinds the
-  cursor so the next shard retries it once.
+  cursor so the next shard retries it once. The model call is TanStack AI
+  `chat()` (`@tanstack/ai-anthropic` over `@tanstack/ai-cloudflare`'s `cloudflareBindingFetch`) on the `AI` binding through AI Gateway (`gatewayChat`, Unified
+  Billing, gateway id `AI_GATEWAY_ID`); `scripts/compare-fal-extract-models.ts`
+  scores candidates through the same code.
   `models.reasoning` (`{ mode, mandatory, efforts? }`; mode is
   adaptive/budget/effort/toggle). `mandatory` has one meaning: `true` the
   source STATES thinking cannot be turned off, `false` it states it can
