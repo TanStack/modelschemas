@@ -71,10 +71,20 @@ export function falPricingExtractCursorKey(providerId = 'fal'): string {
 
 /**
  * Single extract model — fail-closed; never a second guess. Picked by
- * `scripts/compare-fal-extract-models.ts` (#550). Anthropic's id: the
- * binding fetch prefixes `anthropic/` for the gateway.
+ * `scripts/compare-fal-extract-models.ts` (#550). Anthropic's id, which the
+ * adapter needs for its model table; `GATEWAY_MODEL_IDS` names it on the wire.
  */
 export const FAL_PRICING_EXTRACT_MODEL = 'claude-sonnet-5-5'
+
+/**
+ * Cloudflare's catalog id for each Anthropic id (#556): the gateway knows
+ * `anthropic/claude-sonnet-5.5` and 500s on Anthropic's `claude-sonnet-5-5`.
+ * The binding fetch adds the `anthropic/` prefix.
+ */
+export const GATEWAY_MODEL_IDS = {
+  'claude-sonnet-5-5': 'claude-sonnet-5.5',
+  'claude-haiku-5-5': 'claude-haiku-5.5',
+} as const
 
 const extractedBodySchema = rateCardSchema.omit({ source: true }).extend({
   expiresAt: z.iso.datetime().optional(),
@@ -370,9 +380,7 @@ export type ExtractChat = (turns: Array<ChatTurn>) => Promise<string>
 export function gatewayChat(
   ai: Ai,
   gatewayId: string,
-  model:
-    | typeof FAL_PRICING_EXTRACT_MODEL
-    | 'claude-haiku-5-5' = FAL_PRICING_EXTRACT_MODEL,
+  model: keyof typeof GATEWAY_MODEL_IDS = FAL_PRICING_EXTRACT_MODEL,
 ): ExtractChat {
   const bindingFetch = cloudflareBindingFetch({
     binding: ai,
@@ -383,9 +391,12 @@ export function gatewayChat(
   // and drops the binding's error, so keep it and rethrow it as the cause.
   let bindingError: unknown
   const adapter = createAnthropicChat(model, 'cloudflare-binding', {
-    fetch: async (...args: Parameters<typeof bindingFetch>) => {
+    fetch: async (
+      input: Parameters<typeof bindingFetch>[0],
+      init?: RequestInit,
+    ) => {
       try {
-        const response = await bindingFetch(...args)
+        const response = await bindingFetch(input, withGatewayModel(init))
         // A retry got through: an earlier throw is not this call's cause.
         bindingError = undefined
         return response
@@ -412,6 +423,19 @@ export function gatewayChat(
       throw new Error(errorMessage(error), { cause: bindingError })
     }
   }
+}
+
+/** The request with its `model` swapped for the gateway catalog id. */
+function withGatewayModel(
+  init: RequestInit | undefined,
+): RequestInit | undefined {
+  if (typeof init?.body !== 'string') return init
+  const body = JSON.parse(init.body) as { model?: string }
+  const ids: Partial<Record<string, string>> = GATEWAY_MODEL_IDS
+  const id = ids[body.model ?? '']
+  if (id === undefined)
+    throw new Error(`no gateway catalog id for model ${body.model}`)
+  return { ...init, body: JSON.stringify({ ...body, model: id }) }
 }
 
 /**

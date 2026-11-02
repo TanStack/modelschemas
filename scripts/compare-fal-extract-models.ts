@@ -104,7 +104,8 @@ function standInBinding(
       },
       body: JSON.stringify({
         ...body,
-        model: model.replace(/^anthropic\//, ''),
+        // Back from the gateway catalog id to Anthropic's.
+        model: model.replace(/^anthropic\//, '').replaceAll('.', '-'),
       }),
     })
     if (response.ok) pending.push(readUsage(response.clone()).then(onUsage))
