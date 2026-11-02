@@ -358,7 +358,8 @@ describe('extractRateCard through the gateway', () => {
     expect(card.source.hash).toBe(args.sourceHash)
     expect(card.source.url).toBe(args.sourceUrl)
     const [model, input, options] = run.mock.calls[0] ?? []
-    expect(model).toBe(`anthropic/${FAL_PRICING_EXTRACT_MODEL}`)
+    // Cloudflare's catalog id, not Anthropic's (#556).
+    expect(model).toBe('anthropic/claude-sonnet-5.5')
     expect(options).toMatchObject({ gateway: { id: 'gw-test' } })
     // Claude 5 400s on temperature (#550).
     expect(input).not.toHaveProperty('temperature')
