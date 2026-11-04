@@ -645,7 +645,19 @@ export type OpenApiSecurityScheme =
       in: 'header' | 'query' | 'cookie'
       name: string
       description?: string
+      /** AWS Signature Version 4 on the named header (Bedrock). */
+      'x-amazon-apigateway-authtype'?: 'awsSigv4'
     }
+
+/** OpenAPI server object; `variables` fill `{name}` in `url`. */
+export interface ConnectServer {
+  url: string
+  description?: string
+  variables?: Record<
+    string,
+    { default: string; description?: string; enum?: Array<string> }
+  >
+}
 
 /**
  * How to call this provider's data plane. Declared, not guessed from the
@@ -653,7 +665,7 @@ export type OpenApiSecurityScheme =
  * `GET /v1/openapi/{provider}`.
  */
 export interface ProviderConnect {
-  servers: Array<{ url: string; description?: string }>
+  servers: Array<ConnectServer>
   securitySchemes: Record<string, OpenApiSecurityScheme>
   security: Array<Record<string, Array<string>>>
   /**

@@ -1,1 +1,0 @@
-- vercel: endpoint — Vercel publishes no OpenAPI or JSON Schema a generation route can bind. GET https://ai-gateway.vercel.sh/openapi.json, GET https://ai-gateway.vercel.sh/v1/openapi.json, and GET https://ai-gateway.vercel.sh/v1/openapi are 404. The REST reference is prose, https://vercel.com/docs/ai-gateway/sdks-and-apis/rest-api, checked 2026-10-08

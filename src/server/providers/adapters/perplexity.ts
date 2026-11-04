@@ -21,6 +21,7 @@ import {
   sha256Text,
   skippedResult,
 } from '../types.ts'
+import { bearerConnect } from '../connect.ts'
 import type {
   FactSource,
   ListModelsResult,
@@ -506,6 +507,7 @@ export const provider: ProviderConfig = {
   specSourceUrl: PERPLEXITY_OPENAPI_URL,
   modelsEndpoint: PERPLEXITY_MODELS_URL,
   defaultDerivation: 'upstream-spec',
+  connect: bearerConnect('https://api.perplexity.ai'),
   fetchSpec,
   listModels,
   classify,

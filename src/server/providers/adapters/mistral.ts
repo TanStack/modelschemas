@@ -31,6 +31,7 @@ import {
   overlayModelFacts,
 } from '../reasoning-config.ts'
 import { fetchOpenApi } from '../types.ts'
+import { bearerConnect } from '../connect.ts'
 import type {
   ListModelsResult,
   ModelInfo,
@@ -109,6 +110,7 @@ export const provider: ProviderConfig = {
   specSourceUrl: MISTRAL_OPENAPI_URL,
   modelsEndpoint: MISTRAL_MODELS_URL,
   defaultDerivation: 'upstream-spec',
+  connect: bearerConnect('https://api.mistral.ai'),
   fetchSpec,
   listModels: async (env, kv): Promise<ListModelsResult> => {
     const aliases = new Map<string, Array<string>>()

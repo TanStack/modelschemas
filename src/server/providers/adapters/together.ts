@@ -26,6 +26,7 @@ import {
 } from '../together-facts.ts'
 import { togetherMediaPricing } from '../together-pricing.ts'
 import { fetchJson, fetchOpenApi, sha256Text, skippedResult } from '../types.ts'
+import { bearerConnect } from '../connect.ts'
 import type { RateCard } from '@modelschemas/rate-card'
 import type {
   FactSource,
@@ -401,6 +402,7 @@ export const provider: ProviderConfig = {
   specSourceUrl: TOGETHER_OPENAPI_URL,
   modelsEndpoint: TOGETHER_MODELS_URL,
   defaultDerivation: 'upstream-spec',
+  connect: bearerConnect('https://api.together.ai'),
   fetchSpec,
   listModels,
   classify,

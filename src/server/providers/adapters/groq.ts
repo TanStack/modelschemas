@@ -24,6 +24,7 @@ import {
 import { groqModelServerTools } from '../server-tools.ts'
 import { groqGenerationEndpointId, groqModelActivity } from '../model-meta.ts'
 import { fetchText, parseGzippedOpenApi } from '../types.ts'
+import { bearerConnect } from '../connect.ts'
 import type {
   ListModelsResult,
   ProviderConfig,
@@ -110,6 +111,7 @@ export const provider: ProviderConfig = {
   specSourceUrl: GROQ_MOCK_URL,
   modelsEndpoint: GROQ_MODELS_URL,
   defaultDerivation: 'upstream-spec',
+  connect: bearerConnect('https://api.groq.com'),
   fetchSpec,
   listModels,
   classify,
