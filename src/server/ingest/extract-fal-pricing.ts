@@ -248,10 +248,13 @@ function logFetchFailure(
 
 function parseJsonObject(text: string): unknown {
   const trimmed = text.trim()
-  // The model often explains itself before the fence; a fence anywhere
-  // is the reply (#552 — the repair turn was paying for the prose).
+  // The model often explains itself first, fenced or not; the object is
+  // the reply (#552 — the repair turn was paying for the prose). The
+  // schema and verifyExamples still judge what it holds.
   const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(trimmed)
-  const body = fenced?.[1] ?? trimmed
+  const body =
+    fenced?.[1] ??
+    trimmed.slice(trimmed.indexOf('{'), trimmed.lastIndexOf('}') + 1)
   return JSON.parse(body) as unknown
 }
 

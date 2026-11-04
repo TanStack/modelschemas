@@ -451,17 +451,27 @@ Limited-time promo (50% off) until **October 31, 2026**: speech costs **$0.015**
     )
   })
 
-  it('reads the JSON fence after the model explains itself, in one turn (#552)', async () => {
-    // Live Sonnet 5.5 reply shape: a sentence, then the fenced card.
-    const run = gatewayReplies(
-      `The promo ended on October 31, 2026, so I price at the regular rate.\n\n\`\`\`json\n${JSON.stringify(regularCard)}\n\`\`\``,
-    )
-    const card = await extract(
-      { ...args, pricingText: promoSection, now: Date.UTC(2026, 10, 4) / 1000 },
-      run,
-    )
-    expect(card).toMatchObject({ price: regularCard.price })
-    expect(run).toHaveBeenCalledTimes(1)
+  it('reads the card after the model explains itself, fenced or not, in one turn (#552)', async () => {
+    // Live Sonnet 5.5 reply shapes: a sentence, then the card.
+    const prose =
+      'The promo ended on October 31, 2026, so I price at the regular rate.'
+    const json = JSON.stringify(regularCard)
+    for (const reply of [
+      `${prose}\n\n\`\`\`json\n${json}\n\`\`\``,
+      `${prose}\n\n${json}`,
+    ]) {
+      const run = gatewayReplies(reply)
+      const card = await extract(
+        {
+          ...args,
+          pricingText: promoSection,
+          now: Date.UTC(2026, 10, 4) / 1000,
+        },
+        run,
+      )
+      expect(card).toMatchObject({ price: regularCard.price })
+      expect(run).toHaveBeenCalledTimes(1)
+    }
   })
 
   it('returns the rejection when a priced section is refused twice', async () => {
