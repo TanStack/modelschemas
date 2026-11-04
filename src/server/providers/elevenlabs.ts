@@ -40,24 +40,11 @@ const ELEVENLABS_AUDIO_TAGS = new Set([
   'forced-alignment',
   'video-to-music',
   'dubbing',
+  'music-generation',
+  'music',
 ])
 
-/**
- * JSON compose routes. Upstream tags these `music-generation`, the same
- * tag as upload, stem separation, and `POST /v1/music/detailed/stream`.
- * Those stay out: the whole tag pushes ElevenLabs over the 40-path cap
- * on `GET /v1/openapi/{provider}` (`MAX_SPEC_PATHS`) and that document
- * 400s. These four fit.
- */
-const ELEVENLABS_MUSIC_COMPOSE_PATHS = new Set([
-  '/v1/music',
-  '/v1/music/detailed',
-  '/v1/music/stream',
-  '/v1/music/plan',
-])
-
-function classify(path: string, op: OpenApiOperation): Activity | null {
-  if (ELEVENLABS_MUSIC_COMPOSE_PATHS.has(path)) return 'audio'
+function classify(_path: string, op: OpenApiOperation): Activity | null {
   const tags = Array.isArray(op.tags) ? (op.tags as Array<string>) : []
   return tags.some((tag) => ELEVENLABS_AUDIO_TAGS.has(tag)) ? 'audio' : null
 }

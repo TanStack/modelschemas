@@ -148,8 +148,8 @@ spec syncs daily. Responses are JSON unless noted (`text/typescript`,
    Grain=provider models also accept the raw id:
    `/v1/schemas/grok/image/grok-imagine-image-2.0?kind=input`.
 6. GET /v1/openapi/{provider} — generation-only OpenAPI (servers, auth,
-   paths). FAL requires ?model=. Over 40 endpoints, or a filter that
-   matches none: 400 spec_requires_selector. HTTP only (no MCP tool).
+   paths). FAL requires ?model=. A filter that matches none: 400
+   spec_requires_selector. HTTP only (no MCP tool).
 7. POST /v1/validate {"provider","endpointId","payload"} — check a payload.
 8. POST /v1/estimate {"provider","model","request"?,"usage"?} — {amount,
    currency} for a call from the stored rate card. Missing levers → 422;
