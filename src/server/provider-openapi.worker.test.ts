@@ -343,18 +343,18 @@ describe('assembleProviderOpenApi', () => {
     )
   })
 
-  it('refuses assembly over the endpoint cap', async () => {
+  it('assembles a provider-grained document past 40 paths (#560)', async () => {
     await db
       .insert(providers)
       .values({
-        id: 'cap-prov',
-        displayName: 'Cap',
-        specSourceUrl: 'https://example.com/c.json',
+        id: 'openai',
+        displayName: 'OpenAI',
+        specSourceUrl: 'https://example.com/o.json',
       })
       .onConflictDoNothing()
     const rows = Array.from({ length: 41 }, (_, i) => ({
-      id: `cap-prov/e${String(i)}`,
-      providerId: 'cap-prov',
+      id: `openai/e${String(i)}`,
+      providerId: 'openai',
       activity: 'chat' as const,
       method: 'POST',
       path: `/e${String(i)}`,
@@ -365,15 +365,10 @@ describe('assembleProviderOpenApi', () => {
         .values(rows.slice(i, i + 10))
         .onConflictDoNothing()
     }
-    const overCap = await assembleProviderOpenApi(db, 'cap-prov')
-    expect(overCap).toMatchObject({
-      ok: false,
-      status: 400,
-      code: 'spec_requires_selector',
-    })
-    if (overCap.ok) return
-    expect(overCap.message).toContain('does not drop endpoints')
-    expect(overCap.message).toContain('?activity=')
+    const result = await assembleProviderOpenApi(db, 'openai')
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(Object.keys(result.document.paths as object)).toHaveLength(41)
   })
 
   it('refuses OpenAPI assembly for AsyncAPI-flagged FAL models', async () => {

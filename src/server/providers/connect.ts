@@ -8,9 +8,6 @@ import type {
   SpecGrain,
 } from './types.ts'
 
-/** Refuse assembly above this many classified generation endpoints. */
-export const MAX_SPEC_PATHS = 40
-
 export function bearerConnect(
   serverUrl: string,
   description?: string,

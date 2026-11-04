@@ -18,7 +18,6 @@ import {
 import { contentHash } from '#/server/kv.ts'
 import { getProvider } from '#/server/providers/index.ts'
 import {
-  MAX_SPEC_PATHS,
   requiredHeaderParameters,
   resolveSpecGrain,
 } from '#/server/providers/connect.ts'
@@ -134,23 +133,17 @@ function siblingRequestPath(path: string): string {
   return `${path}/requests/{request_id}`
 }
 
-function refuseSelector(
+function refuseModelGrained(
   providerId: string,
-  grain: 'provider' | 'model',
   count: number,
-  reason: string,
 ): AssembleOpenApiResult {
   const example = `GET /v1/openapi/${providerId}?model=`
-  const schemas = `GET /v1/schemas/${providerId}`
   const models = `GET /v1/providers/${providerId}/models`
   return {
     ok: false,
     status: 400,
     code: 'spec_requires_selector',
-    message:
-      grain === 'model'
-        ? `Provider '${providerId}' is model-grained (${String(count)} endpoints) — there is no combined OpenAPI document. Pass ?model={rawId}, e.g. ${example}<rawId>. List models: ${models}.`
-        : `${reason} ?model= pins the live model enum; it does not drop endpoints on provider-grained specs. Narrow with ?activity= (${activities.join(', ')}). List endpoints: ${schemas}. List models: ${models}.`,
+    message: `Provider '${providerId}' is model-grained (${String(count)} endpoints) — there is no combined OpenAPI document. Pass ?model={rawId}, e.g. ${example}<rawId>. List models: ${models}.`,
   }
 }
 
@@ -295,7 +288,8 @@ function buildSiblingGet(
 
 /**
  * Assemble GET /v1/openapi/{provider}. Refuses combined documents for
- * model-grained providers and for selections over {@link MAX_SPEC_PATHS}.
+ * model-grained providers; a provider-grained document is never capped by
+ * path count — client generation needs the whole generation surface (#560).
  */
 export async function assembleProviderOpenApi(
   db: Db,
@@ -374,12 +368,7 @@ export async function assembleProviderOpenApi(
   }
 
   if (grain === 'model' && pinnedModel === undefined) {
-    return refuseSelector(
-      providerId,
-      'model',
-      loaded.length,
-      `Provider '${providerId}' is model-grained.`,
-    )
+    return refuseModelGrained(providerId, loaded.length)
   }
 
   const profile = applyConnectProfile(config, selected)
@@ -396,15 +385,6 @@ export async function assembleProviderOpenApi(
         ? `No generation endpoints for provider '${providerId}'${activity ? ` activity '${activity}'` : ''}${pinnedModel ? ` model '${pinnedModel}'` : ''}. List endpoints: GET /v1/schemas/${providerId}. Valid activities: ${activities.join(', ')}.`
         : `Provider '${providerId}' has no synced generation endpoints yet. Check GET /v1/status or POST /v1/admin/sync/${providerId}. Index: GET /v1/schemas/${providerId}.`,
     }
-  }
-
-  if (selected.length > MAX_SPEC_PATHS) {
-    return refuseSelector(
-      providerId,
-      grain,
-      selected.length,
-      `Selection matches ${String(selected.length)} endpoints (cap ${String(MAX_SPEC_PATHS)}).`,
-    )
   }
 
   if (!connect || connect.servers.length === 0) {

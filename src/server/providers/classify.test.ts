@@ -259,24 +259,23 @@ describe('elevenlabs classify', () => {
       }),
     ).toBeNull()
     expect(elevenlabsProvider.classify('/v1/anything', {})).toBeNull()
-    // The live compose tag is `music-generation`. The rest of that tag
-    // (upload, stem separation, detailed stream) stays out so the
-    // provider OpenAPI document stays within MAX_SPEC_PATHS.
+    // The whole `music-generation` tag is in: the provider OpenAPI document
+    // has no path cap (#560), so nothing is carved out to fit one.
     expect(
       elevenlabsProvider.classify('/v1/music/upload', {
         tags: ['music-generation'],
       }),
-    ).toBeNull()
+    ).toBe('audio')
     expect(
       elevenlabsProvider.classify('/v1/music/stem-separation', {
         tags: ['music-generation'],
       }),
-    ).toBeNull()
+    ).toBe('audio')
     expect(
       elevenlabsProvider.classify('/v1/music/detailed/stream', {
         tags: ['music-generation'],
       }),
-    ).toBeNull()
+    ).toBe('audio')
     expect(elevenlabsProvider.classify('/v1/music', { tags: ['music'] })).toBe(
       'audio',
     )
