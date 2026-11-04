@@ -989,6 +989,12 @@ export interface MistralModelPage {
   /** Set when `pagePrice` was read from the markdown twin, not the HTML widget. */
   priceUrl?: string
   priceHash?: string
+  /**
+   * The markdown twin 404'd, so this page does not say the price is gone.
+   * Its ids stay out of `seen`: `clearUnpriced` would otherwise null a
+   * card the source could not be read for.
+   */
+  priceUnread?: boolean
   features?: Array<string> | null
   extractedAt?: string
 }
@@ -1029,7 +1035,7 @@ export function indexMistralApiIds(
 
 type PricedFacts = Pick<
   ModelInfo,
-  'pricing' | 'factSources' | 'serverTools' | 'modalities'
+  'pricing' | 'factSources' | 'serverTools' | 'modalities' | 'absent'
 >
 
 interface MistralStatedModalities {
@@ -1265,6 +1271,7 @@ export async function mistralModelPricing(
       let pagePrice = parseMistralPagePrice(body)
       let priceUrl: string | undefined
       let priceHash: string | undefined
+      let priceUnread = false
       // The pricing table already priced this slug. Its page's markdown
       // is a second statement of the same card, not a replacement.
       if (!pagePrice && !bySlug.has(slug)) {
@@ -1274,6 +1281,8 @@ export async function mistralModelPricing(
           markdown = await fetchText(mdUrl)
         } catch (error) {
           if (!isMissingDocsPage(error)) throw error
+          // The twin is the price source. A 404 is not "no price".
+          priceUnread = true
         }
         const stated = markdown ? parseMistralMarkdownPrice(markdown) : null
         if (stated && markdown) {
@@ -1294,6 +1303,7 @@ export async function mistralModelPricing(
         maxOutput: parseMistralPageMaxOutput(body),
         pagePrice,
         ...(priceUrl && priceHash ? { priceUrl, priceHash } : {}),
+        ...(priceUnread ? { priceUnread: true } : {}),
         extractedAt: new Date().toISOString(),
       }
     })
@@ -1374,7 +1384,14 @@ export async function mistralModelPricing(
       hash: await sha256Text(markdown),
     }
   })
-  const seen = new Set(pages.flatMap((page) => page.ids))
+  // A 404 markdown twin was not read. Those ids stay out of `seen` so a
+  // missing file cannot clear a stored card, and the lookup keeps it.
+  const priceUnread = new Set(
+    pages.filter((page) => page.priceUnread).flatMap((page) => page.ids),
+  )
+  const seen = new Set(
+    pages.filter((page) => !page.priceUnread).flatMap((page) => page.ids),
+  )
   const lookup = (rawId: string): PricedFacts => {
     const tableRow = byId.get(rawId)
     const pageRow = pageRates.get(rawId)
@@ -1444,11 +1461,19 @@ export async function mistralModelPricing(
       ...modalityFacts,
       ...maxFacts,
     }
-    if (!pricing && serverTools.length === 0 && !stated && !cap) {
+    const pricingUnread = !pricing && priceUnread.has(rawId) && !seen.has(rawId)
+    if (
+      !pricing &&
+      serverTools.length === 0 &&
+      !stated &&
+      !cap &&
+      !pricingUnread
+    ) {
       return {}
     }
     return {
       ...(pricing ? { pricing } : {}),
+      ...(pricingUnread ? { absent: { pricing: 'unavailable' as const } } : {}),
       ...(serverTools.length > 0 ? { serverTools } : {}),
       ...(stated ? { modalities: stated.modalities } : {}),
       ...(cap ? { maxOutput: cap.value } : {}),

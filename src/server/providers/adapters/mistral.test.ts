@@ -65,8 +65,10 @@ describe('mistral listModels', () => {
       if (href === MISTRAL_DEPRECATIONS_URL) {
         return Promise.resolve(new Response(MODELS_PAGE))
       }
+      // Docs stay off the network. A live pricing table plus one page
+      // per slug blows the 5s test limit once missing ids pull markdown.
       if (!href.startsWith('https://api.mistral.ai/')) {
-        return original(url, init)
+        return Promise.resolve(new Response('not found', { status: 404 }))
       }
       return Promise.resolve(
         new Response(

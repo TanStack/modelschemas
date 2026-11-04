@@ -787,6 +787,68 @@ describe('mistral model page price and max output', () => {
       globalThis.fetch = original
     }
   })
+
+  it('keeps the card when the markdown twin 404s and clears a page that states no price', async () => {
+    const original = globalThis.fetch
+    const docs: Record<string, string> = {
+      'https://docs.mistral.ai/inference/pricing': `<h2>Flagship models</h2>
+<p>Prices /M Tokens</p>
+<table>
+<tr><td><a href="/models/mistral-small-4-0-26-03">Small</a></td><td>$0.15</td><td>—</td><td>$0.6</td></tr>
+</table>`,
+      'https://docs.mistral.ai/resources/changelogs': '',
+      'https://docs.mistral.ai/models.md': `| [TTS](/models/voxtral-tts-26-03) | \`voxtral-mini-tts-2603\` | Deprecated |
+| [Leanstral](/models/leanstral-1-5) | \`labs-leanstral-1-5\` | Deprecated |`,
+      'https://docs.mistral.ai/models':
+        '<a href="/models/not-a-listed-id">x</a>',
+      'https://docs.mistral.ai/models/mistral-small-4-0-26-03':
+        mistralModelPage(
+          ['mistral-small-2603'],
+          [[tip('Text input'), tip('Text output')]],
+        ),
+      'https://docs.mistral.ai/models/voxtral-tts-26-03': mistralModelPage(
+        ['voxtral-mini-tts-2603'],
+        [[tip('Text input'), tip('Text output')]],
+      ),
+      'https://docs.mistral.ai/models/leanstral-1-5': mistralModelPage(
+        ['labs-leanstral-1-5'],
+        [[tip('Text input'), tip('Text output')]],
+      ),
+      'https://docs.mistral.ai/models/leanstral-1-5.md':
+        '- Pricing: Free; Input $0 /M Tokens; Output $0 /M Tokens\n',
+      'https://docs.mistral.ai/studio/agents/agent-tools/websearch.md':
+        MISTRAL_WEBSEARCH_GUIDE,
+    }
+    globalThis.fetch = ((url: string) => {
+      const body = docs[String(url)]
+      return Promise.resolve(
+        body === undefined
+          ? new Response('missing', { status: 404 })
+          : new Response(body),
+      )
+    }) as typeof fetch
+    try {
+      const lookup = await mistralModelPricing(undefined, [
+        'mistral-small-2603',
+        'voxtral-mini-tts-2603',
+        'labs-leanstral-1-5',
+      ])
+      expect(lookup.seen.has('voxtral-mini-tts-2603')).toBe(false)
+      expect(lookup('voxtral-mini-tts-2603').pricing).toBeUndefined()
+      expect(lookup('voxtral-mini-tts-2603').absent).toEqual({
+        pricing: 'unavailable',
+      })
+      expect(lookup('voxtral-mini-tts-2603').modalities).toEqual({
+        input: ['text'],
+        output: ['text'],
+      })
+      expect(lookup.seen.has('labs-leanstral-1-5')).toBe(true)
+      expect(lookup('labs-leanstral-1-5').pricing).toBeUndefined()
+      expect(lookup('labs-leanstral-1-5').absent).toBeUndefined()
+    } finally {
+      globalThis.fetch = original
+    }
+  })
 })
 
 describe('mistral alias facts', () => {
