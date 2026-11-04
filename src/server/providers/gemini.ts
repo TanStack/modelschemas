@@ -17,6 +17,7 @@ import {
   geminiRequestMap,
   geminiWire,
 } from './gemini-request.ts'
+import { docsReport, docsRun } from './model-facts.ts'
 import { geminiGenerationEndpointId } from './model-meta.ts'
 import {
   GEMINI_RELEASE_DATES,
@@ -314,7 +315,10 @@ async function listModels(
   if (!key) {
     return { models: [], ...skippedResult('gemini', 'GEMINI_API_KEY') }
   }
-  const pricingPromise = geminiModelPricing(kv)
+  // A docs miss is `unavailable` on the rows plus `docsFailures` on the
+  // result. It must not throw away the listing (#567).
+  const docs = docsRun()
+  const pricingPromise = geminiModelPricing(kv, docs)
   const wirePromise = geminiWire(kv)
   const bindingsPromise = geminiPublishedBindings(kv)
   const listed: Array<GeminiModel> = []
@@ -333,7 +337,7 @@ async function listModels(
     pageToken = body.nextPageToken
   } while (pageToken)
   const rawIdOf = (m: GeminiModel) => m.name.replace(/^models\//, '')
-  const [pricing, wire, { features, docsFailures }, bindings] =
+  const [pricing, wire, { features, docsFailures, thinkingLoaded }, bindings] =
     await Promise.all([
       pricingPromise,
       wirePromise,
@@ -355,10 +359,19 @@ async function listModels(
     const usesConfig =
       methods.includes('generateContent') ||
       methods.includes('bidiGenerateContent')
+    // The thinking page supplies budget numbers the map's thinking body
+    // needs. While it is unread, keep the stored map.
     const requestMap =
-      activity === 'chat' && usesConfig
+      activity === 'chat' && usesConfig && thinkingLoaded
         ? geminiRequestMap(wire.fields, feat.reasoning, feat.budget)
         : null
+    const absent = {
+      ...priced.absent,
+      ...feat.absent,
+      ...(thinkingLoaded || activity !== 'chat' || !usesConfig
+        ? {}
+        : { requestMap: 'unavailable' as const }),
+    }
     return {
       rawId,
       displayName: m.displayName ?? null,
@@ -388,19 +401,23 @@ async function listModels(
         ...feat.factSources,
         ...(requestMap ? { requestMap: wire.source } : {}),
       },
-      ...(priced.absent || feat.absent
-        ? { absent: { ...priced.absent, ...feat.absent } }
-        : {}),
+      ...(Object.keys(absent).length > 0 ? { absent } : {}),
     }
   })
+  const pricingDocs = docsReport(docs)
   return {
     docsFailures: {
-      failed: docsFailures.failed + bindings.docsFailures.failed,
-      skipped: docsFailures.skipped + bindings.docsFailures.skipped,
-      first: [...docsFailures.first, ...bindings.docsFailures.first].slice(
-        0,
-        5,
-      ),
+      failed:
+        pricingDocs.failed + docsFailures.failed + bindings.docsFailures.failed,
+      skipped:
+        pricingDocs.skipped +
+        docsFailures.skipped +
+        bindings.docsFailures.skipped,
+      first: [
+        ...pricingDocs.first,
+        ...docsFailures.first,
+        ...bindings.docsFailures.first,
+      ].slice(0, 5),
     },
     models: attachGeminiPublishedFacts(models, bindings),
   }

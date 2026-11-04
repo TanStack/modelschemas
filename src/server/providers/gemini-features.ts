@@ -20,7 +20,6 @@ import {
  */
 import {
   assertParsed,
-  cachedDocs,
   docsReport,
   docsRun,
   mapConcurrent,
@@ -512,8 +511,11 @@ function docMatches(rawId: string, doc: GeminiIndexDoc): boolean {
  * Reasoning, server tools and modalities per listed id, with provenance.
  * A model page that fails to load is that family's alone: its rows keep the
  * stored tools and modalities (`absent`) and the failure is in
- * `docsFailures`. Reasoning the thinking table does not name is kept the
- * same way, so a stored page-derived object survives a blip.
+ * `docsFailures`. The models index and the thinking page are the same kind
+ * of load: a throw is counted and the facts they feed stay `unavailable`,
+ * so one reshaped docs host does not drop the listing (#567). Reasoning
+ * the thinking table does not name is kept the same way, so a stored
+ * page-derived object survives a blip.
  */
 export async function geminiModelFeatures(
   rawIds: Array<string>,
@@ -521,29 +523,42 @@ export async function geminiModelFeatures(
 ): Promise<{
   features: (rawId: string, thinking: boolean | undefined) => GeminiFeatures
   docsFailures: DocsFailures
+  /** False when the thinking page failed. The request map stays stored. */
+  thinkingLoaded: boolean
 }> {
+  const run = docsRun()
   const [index, thinking, nativeAudio] = await Promise.all([
-    cachedDocs(kv, GEMINI_MODELS_INDEX_URL, async () => {
-      const markdown = await fetchText(GEMINI_MODELS_INDEX_URL)
-      const parsed = parseModelIndexDocs(markdown)
-      if (!parsed.some((doc) => modelSlug(doc.url))) {
-        throw new Error('gemini models index: 0 slugs')
-      }
-      return parsed
-    }),
-    cachedDocs(kv, GEMINI_THINKING_URL, async () => {
-      const markdown = await fetchText(GEMINI_THINKING_URL)
-      const parsed = parseThinkingPage(markdown)
-      assertParsed(parsed, 'gemini thinking page')
-      return {
-        reasoning: Object.fromEntries(parsed),
-        budgets: Object.fromEntries(parseThinkingBudgets(markdown)),
-        hash: await sha256Text(markdown),
-      }
-    }),
+    tryDocs(run, GEMINI_MODELS_INDEX_URL, (cached) =>
+      cached(kv, GEMINI_MODELS_INDEX_URL, async () => {
+        const markdown = await fetchText(GEMINI_MODELS_INDEX_URL)
+        const parsed = parseModelIndexDocs(markdown)
+        if (!parsed.some((doc) => modelSlug(doc.url))) {
+          throw new Error('gemini models index: 0 slugs')
+        }
+        return parsed
+      }),
+    ),
+    tryDocs(run, GEMINI_THINKING_URL, (cached) =>
+      cached(kv, GEMINI_THINKING_URL, async () => {
+        const markdown = await fetchText(GEMINI_THINKING_URL)
+        const parsed = parseThinkingPage(markdown)
+        assertParsed(parsed, 'gemini thinking page')
+        return {
+          reasoning: Object.fromEntries(parsed),
+          budgets: Object.fromEntries(parseThinkingBudgets(markdown)),
+          hash: await sha256Text(markdown),
+        }
+      }),
+    ),
     geminiNativeAudioThinking(rawIds, kv),
   ])
-  const slugs = index.flatMap((doc) => {
+  const indexDocs = index ?? []
+  const thinkingDoc = thinking ?? {
+    reasoning: {},
+    budgets: {},
+    hash: '',
+  }
+  const slugs = indexDocs.flatMap((doc) => {
     const slug = modelSlug(doc.url)
     return slug ? [slug] : []
   })
@@ -556,15 +571,18 @@ export async function geminiModelFeatures(
     .filter(
       (id) =>
         /^[a-z0-9][a-z0-9.-]*$/.test(id) &&
-        !index.some((doc) => docMatches(id, doc)),
+        !indexDocs.some((doc) => docMatches(id, doc)),
     )
     .map((id) => ({ url: `${GEMINI_MODEL_PAGE_BASE}${id}`, ids: [] }))
-  const docs = [...index, ...unindexed]
-  const needed = [
-    ...index.filter((doc) => rawIds.some((id) => docMatches(id, doc))),
-    ...unindexed,
-  ]
-  const run = docsRun()
+  // No index: the per-id URLs are a guess, and a 404 there would write
+  // null modalities. Keep the stored page facts instead of fetching.
+  const docs = index ? [...index, ...unindexed] : []
+  const needed = index
+    ? [
+        ...index.filter((doc) => rawIds.some((id) => docMatches(id, doc))),
+        ...unindexed,
+      ]
+    : []
   const pages = await mapConcurrent(needed, 8, (doc) => {
     const url = pageUrl(doc.url)
     const optional = unindexed.includes(doc)
@@ -599,7 +617,7 @@ export async function geminiModelFeatures(
   const bySlug = new Map<string, BoundSection>()
   const loadedUrls = new Set(loaded.map((page) => page.url))
   const placements = loaded.flatMap((page) =>
-    pagePlacements(page, index, bySlug),
+    pagePlacements(page, indexDocs, bySlug),
   )
   for (const kind of ['code', 'version', 'index', 'sibling'] as const) {
     for (const place of placements) {
@@ -622,15 +640,43 @@ export async function geminiModelFeatures(
     const slug = familyOf(rawId, slugs)
     return slug ? bySlug.get(slug) : undefined
   }
+  const keepFailedDocs = (
+    result: GeminiFeatures,
+    modelThinks: boolean | undefined,
+  ): GeminiFeatures => {
+    const facts: Array<ModelFact> = []
+    if (!index) facts.push('serverTools', 'modalities')
+    // The thinking page failed and no model page stated a replacement.
+    // `false` from the listing is the API saying this model does not think.
+    if (
+      !thinking &&
+      modelThinks !== false &&
+      result.reasoning == null &&
+      result.absent?.reasoning !== 'unavailable'
+    ) {
+      facts.push('reasoning')
+    }
+    if (facts.length === 0) return result
+    return {
+      ...result,
+      ...(!index ? { serverTools: null, modalities: null } : {}),
+      absent: { ...result.absent, ...unavailable(...facts).absent },
+    }
+  }
   const features = (
+    rawId: string,
+    modelThinks: boolean | undefined,
+  ): GeminiFeatures =>
+    keepFailedDocs(readFeatures(rawId, modelThinks), modelThinks)
+  const readFeatures = (
     rawId: string,
     modelThinks: boolean | undefined,
   ): GeminiFeatures => {
     const factSources: ModelFactSources = {}
-    const budgetId = familyOf(rawId, Object.keys(thinking.budgets))
+    const budgetId = familyOf(rawId, Object.keys(thinkingDoc.budgets))
     const budget =
       modelThinks !== false && budgetId
-        ? (thinking.budgets[budgetId] ?? null)
+        ? (thinkingDoc.budgets[budgetId] ?? null)
         : null
     const bound = lookup(rawId)
     const documentedThinking =
@@ -638,10 +684,10 @@ export async function geminiModelFeatures(
       (bound?.thinking === true || bound?.reasoning != null)
     const thinks = modelThinks === true || documentedThinking
     const family = thinks
-      ? familyOf(rawId, Object.keys(thinking.reasoning))
+      ? familyOf(rawId, Object.keys(thinkingDoc.reasoning))
       : null
-    let reasoning = family ? (thinking.reasoning[family] ?? null) : null
-    if (reasoning && family) {
+    let reasoning = family ? (thinkingDoc.reasoning[family] ?? null) : null
+    if (reasoning && family && thinking) {
       factSources.reasoning = {
         derivation: 'docs-derived',
         sourceUrl: GEMINI_THINKING_URL,
@@ -681,7 +727,7 @@ export async function geminiModelFeatures(
         sourceHash: bound.hash,
         path: 'thinking level',
       }
-    } else if (thinks && !reasoning) {
+    } else if (thinking && thinks && !reasoning) {
       factSources.reasoning = {
         derivation: 'docs-derived',
         sourceUrl: GEMINI_THINKING_URL,
@@ -732,7 +778,11 @@ export async function geminiModelFeatures(
       },
     }
   }
-  return { features, docsFailures: docsReport(run) }
+  return {
+    features,
+    docsFailures: docsReport(run),
+    thinkingLoaded: thinking !== null,
+  }
 }
 
 interface Placement {
