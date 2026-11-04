@@ -397,6 +397,60 @@ describe('extractRateCard through the gateway', () => {
     expect(textOf(retry.messages[2]?.content)).toContain('$0.08')
   })
 
+  const promoSection = `## Pricing
+
+Limited-time promo (50% off) until **October 31, 2026**: speech costs **$0.015** per **1,000 characters** of input text (regular price: $0.03).`
+  const promoCard = {
+    inputs: {
+      characters: { param: 'characters', kind: 'number', bound: 'usage' },
+    },
+    tables: {},
+    price: { '*': [{ '/': [{ var: 'characters' }, 1000] }, 0.015] },
+    examples: [
+      {
+        params: { characters: 1000 },
+        usd: 0.015,
+        quote: 'speech costs **$0.015** per **1,000 characters**',
+      },
+    ],
+    expiresAt: '2026-10-31T23:59:59Z',
+  }
+  const { expiresAt: _promoEnd, ...regularCard } = {
+    ...promoCard,
+    price: { '*': [{ '/': [{ var: 'characters' }, 1000] }, 0.03] },
+    examples: [
+      {
+        params: { characters: 1000 },
+        usd: 0.03,
+        quote: 'regular price: $0.03',
+      },
+    ],
+  }
+
+  it('keeps a promo card whose end is still ahead', async () => {
+    const run = gatewayReplies(promoCard)
+    const card = await extract({ ...args, pricingText: promoSection }, run)
+    expect(card).toMatchObject({ source: { expiresAt: promoCard.expiresAt } })
+    expect(textOf(runInput(run, 0).messages[0]?.content)).toContain(
+      'Today: 2026-06-11',
+    )
+  })
+
+  it('sends an ended promo back once and takes the regular rate (#552)', async () => {
+    const run = gatewayReplies(promoCard, regularCard)
+    const card = await extract(
+      { ...args, pricingText: promoSection, now: Date.UTC(2026, 10, 4) / 1000 },
+      run,
+    )
+    expect(card).toMatchObject({ price: regularCard.price })
+    if (card === 'unverified' || 'error' in card) return
+    expect(card.source.expiresAt).toBeUndefined()
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(textOf(runInput(run, 1).messages[2]?.content)).toContain(
+      'the promo ended 2026-10-31T23:59:59Z',
+    )
+  })
+
   it('returns the rejection when a priced section is refused twice', async () => {
     for (const reply of [{ unverified: true }, { ...body, examples: [] }]) {
       const run = gatewayReplies(reply, reply)

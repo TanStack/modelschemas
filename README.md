@@ -366,6 +366,28 @@ Settings:
 `bun run deploy` remains the manual/emergency path (build + the same
 migrate-then-deploy).
 
+A green CI run is not a deploy. Before debugging a production symptom a
+merged PR should have fixed, confirm the merge is live:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<account> bunx wrangler deployments list --name modelschemas | tail
+```
+
+The newest `Created:` must postdate the merge. If it does not, the Builds
+connection is broken (the move to `TanStack/modelschemas` dropped it —
+#553 — and #557 stayed undeployed for two days while every FAL extract kept
+failing on the old model id, #552). Reconnect it, or deploy by hand with
+the production browser config:
+
+```bash
+DOPPLER_PROJECT=modelschemas CLOUDFLARE_ACCOUNT_ID=<account> \
+  bun run secrets:build && bun run deploy:ci
+```
+
+`DOPPLER_PROJECT` is needed because the secrets scripts pass no
+`--project`; `CLOUDFLARE_ACCOUNT_ID` because wrangler cannot pick between
+two authorised accounts non-interactively.
+
 ## Releasing on npm
 
 Non-additive API changes are recorded in [docs/api-changes.md](docs/api-changes.md).

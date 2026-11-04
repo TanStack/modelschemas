@@ -255,6 +255,7 @@ function parseJsonObject(text: string): unknown {
 
 export const EXTRACT_SYSTEM = `You write a modelschemas RateCard — a price calculator — from a FAL model's llms.txt Pricing section.
 Return JSON only: {"inputs": {...}, "tables": {...}, "price": <JSONLogic>, "examples": [...]}, optionally "expiresAt" (ISO datetime) when the text names a promo end. Do not include a source object.
+A promo whose end is before today (the message states today) is over: price at the regular rate the text states, with no expiresAt; if it states no regular rate, return {"unverified": true}.
 
 inputs: name → {"param": <field>, "kind": "number"|"enum"|"boolean"|"count", "bound": "request"|"usage", "default"?: ..., "values"?: [...] (enum only)}.
 - A request-bound param MUST be one of the allowed request properties (or a dotted child of one). Give it a default when the request may omit it.
@@ -280,9 +281,11 @@ Example. Section: "Each edit costs $0.10, plus $0.02 per reference image." Allow
 function extractUserPrompt(
   pricingText: string,
   requestProperties: ReadonlySet<string>,
+  now: number,
 ): string {
   const allowed = [...requestProperties].sort().join(', ')
-  return `Allowed request properties: ${allowed || '(none)'}
+  return `Today: ${new Date(now * 1000).toISOString().slice(0, 10)}
+Allowed request properties: ${allowed || '(none)'}
 
 Pricing section:
 ${pricingText}`
@@ -334,6 +337,14 @@ export function checkExtractedCard(
       : 'unverified'
   }
   const card = withSource(parsed.data, args)
+  // A card must not arrive already expired: the catalog would serve the
+  // ended promo until the next lap re-read it the same way (#552).
+  const expiresAt = card.source.expiresAt
+  if (expiresAt !== undefined && Date.parse(expiresAt) <= args.now * 1000) {
+    return {
+      error: `the promo ended ${expiresAt}; price at the regular rate the section states, without expiresAt`,
+    }
+  }
   if (!cardRequestParamsOk(card, args.requestProperties)) {
     return {
       error:
@@ -449,7 +460,11 @@ export async function extractRateCard(
   const turns: Array<ChatTurn> = [
     {
       role: 'user',
-      content: extractUserPrompt(args.pricingText, args.requestProperties),
+      content: extractUserPrompt(
+        args.pricingText,
+        args.requestProperties,
+        args.now,
+      ),
     },
   ]
   try {
