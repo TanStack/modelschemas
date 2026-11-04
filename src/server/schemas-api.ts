@@ -148,6 +148,7 @@ export async function getActivitySchemaMap(
   const map: Record<string, SchemaPair> = {}
   for (const row of rows) {
     const id = publicEndpointId(row.endpointId, providerId)
+    if (row.kind === 'stream') continue
     if (row.kind === null || row.schema === null) {
       map[id] = { input: null, output: null }
     } else {

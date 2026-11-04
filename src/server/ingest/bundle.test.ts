@@ -143,7 +143,7 @@ describe('extractEndpointSchemas', () => {
     expect(result.outputContentTypes).toEqual(['audio/mpeg'])
   })
 
-  it('publishes text/event-stream alone when the success body also has JSON', () => {
+  it('keeps JSON and stores the event-stream schema separately', () => {
     const spec = structuredClone(fixtureSpec())
     const post = spec.paths?.['/v1/messages']?.post as
       | {
@@ -151,23 +151,43 @@ describe('extractEndpointSchemas', () => {
         }
       | undefined
     const ok = post?.responses?.['200']
-    if (!ok?.content) throw new Error('fixture missing /v1/messages')
-    ok.content['text/event-stream'] = ok.content['application/json']
+    const schemas = spec.components?.schemas
+    if (!ok?.content || !schemas)
+      throw new Error('fixture missing /v1/messages')
+    schemas.Chunk = {
+      type: 'object',
+      properties: { delta: { type: 'string' } },
+    }
+    ok.content['text/event-stream'] = {
+      schema: { $ref: '#/components/schemas/Chunk' },
+    }
     const result = extractEndpointSchemas(spec, '/v1/messages')
     expect(result.inputContentType).toBe('application/json')
-    expect(result.outputContentTypes).toEqual(['text/event-stream'])
-    expect(result.output?.type).toBe('object')
+    expect(result.outputContentTypes).toEqual([
+      'application/json',
+      'text/event-stream',
+    ])
+    expect(result.output?.$defs).toBeDefined()
+    expect(result.streamOutput).toMatchObject({
+      type: 'object',
+      properties: { delta: { type: 'string' } },
+    })
+    expect(result.streamOutput?.$defs).toBeUndefined()
   })
 
-  it('publishes text/event-stream when the request declares stream and the spec lists only JSON', () => {
+  it('does not treat a boolean stream field as an event stream', () => {
     const spec = structuredClone(fixtureSpec())
     const create = spec.components?.schemas?.CreateMessage as
       | { properties?: Record<string, unknown> }
       | undefined
     if (!create?.properties) throw new Error('fixture missing CreateMessage')
-    create.properties.stream = { type: 'boolean' }
+    create.properties.stream = {
+      type: 'boolean',
+      description: 'Whether to stream the response using server-sent events.',
+    }
     const result = extractEndpointSchemas(spec, '/v1/messages')
-    expect(result.outputContentTypes).toEqual(['text/event-stream'])
+    expect(result.outputContentTypes).toEqual(['application/json'])
+    expect(result.streamOutput).toBeUndefined()
   })
 
   it('keeps audio types beside an event stream when the success body is not JSON', () => {

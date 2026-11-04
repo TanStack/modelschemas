@@ -85,6 +85,11 @@ export interface ClassifiedEndpoint {
   verifiedAt: string | null
   input?: Record<string, JsonValue>
   output?: Record<string, JsonValue>
+  /**
+   * SSE event schema when `output` is the JSON success body. Absent when
+   * there is no separate event schema.
+   */
+  streamOutput?: Record<string, JsonValue>
   /** Set only when the body is not `application/json`. */
   requestContentType: string | null
   /** Set only when the success body is not a single JSON media type. */
@@ -159,6 +164,7 @@ export function classifyAndBundle(
         for (const [kind, schema] of [
           ['input', extracted.input],
           ['output', extracted.output],
+          ['stream', extracted.streamOutput],
         ] as const) {
           if (schema && findDanglingRefs(schema).length > 0) {
             warnings.push(
@@ -191,6 +197,7 @@ export function classifyAndBundle(
           verifiedAt,
           input: extracted.input,
           output: extracted.output,
+          streamOutput: extracted.streamOutput,
           requestContentType: storedRequestContentType(
             extracted.inputContentType,
           ),
@@ -352,7 +359,10 @@ export async function ensureProviderRow(
 }
 
 /** Composite map key for an endpoint's current version of one kind. */
-function versionKey(endpointId: string, kind: 'input' | 'output'): string {
+function versionKey(
+  endpointId: string,
+  kind: 'input' | 'output' | 'stream',
+): string {
   return `${endpointId}\u0000${kind}`
 }
 
@@ -501,9 +511,10 @@ export async function syncProvider(
         .where(eq(endpoints.id, endpoint.dbId))
     }
 
-    for (const [kind, schema] of [
-      ['input', endpoint.input],
-      ['output', endpoint.output],
+    for (const [kind, schema, announce] of [
+      ['input', endpoint.input, true],
+      ['output', endpoint.output, true],
+      ['stream', endpoint.streamOutput, false],
     ] as const) {
       if (!schema) continue
       const hash = await contentHash(schema)
@@ -542,36 +553,38 @@ export async function syncProvider(
             createdAt: now,
           },
         })
-      const change = db.insert(changes).values({
-        id: newChangeId(),
-        type: current ? 'schema.updated' : 'schema.added',
-        providerId: provider.id,
-        subjectId: endpoint.dbId,
-        summary: `${current ? 'Updated' : 'Added'} ${kind} schema for ${endpoint.path}`,
-        payload: {
-          kind,
-          contentHash: hash,
-          previousHash: current?.contentHash ?? null,
-        },
-        createdAt: now,
-      })
-      // One batch, so a run that dies here never leaves two current rows,
-      // nor a current row with no change, which no later run would write:
-      // the next run finds the hash current and skips it.
-      if (current) {
-        await db.batch([
-          db
+      // One batch, so a run that dies here never leaves two current rows.
+      // `stream` is not a public schema kind: the generation document reads
+      // the row, and the changes feed stays `input` | `output`.
+      const supersede = current
+        ? db
             .update(schemaVersions)
             .set({ supersededAt: now })
-            .where(eq(schemaVersions.id, current.id)),
-          insert,
-          change,
-        ])
+            .where(eq(schemaVersions.id, current.id))
+        : null
+      if (announce) {
+        const change = db.insert(changes).values({
+          id: newChangeId(),
+          type: current ? 'schema.updated' : 'schema.added',
+          providerId: provider.id,
+          subjectId: endpoint.dbId,
+          summary: `${current ? 'Updated' : 'Added'} ${kind} schema for ${endpoint.path}`,
+          payload: {
+            kind,
+            contentHash: hash,
+            previousHash: current?.contentHash ?? null,
+          },
+          createdAt: now,
+        })
+        if (supersede) await db.batch([supersede, insert, change])
+        else await db.batch([insert, change])
+        outcome.changesWritten++
+      } else if (supersede) {
+        await db.batch([supersede, insert])
       } else {
-        await db.batch([insert, change])
+        await insert
       }
       outcome.versionsAdded++
-      outcome.changesWritten++
     }
   }
 

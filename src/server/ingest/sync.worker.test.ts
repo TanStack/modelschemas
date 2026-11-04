@@ -256,17 +256,30 @@ describe('syncProvider', () => {
 
     const first = await syncProvider(deps, stubProvider(id, spec))
     expect(first.error).toBeUndefined()
-    expect(first.versionsAdded).toBe(2)
+    expect(first.versionsAdded).toBe(3)
     const row = (await providerEndpoints(deps.db, id))[0]
     expect(row?.requestContentType).toBeNull()
-    expect(row?.responseContentTypes).toEqual(['text/event-stream'])
+    expect(row?.responseContentTypes).toEqual([
+      'application/json',
+      'text/event-stream',
+    ])
+    const versions = await deps.db
+      .select()
+      .from(schemaVersions)
+      .where(eq(schemaVersions.endpointId, row?.id ?? ''))
+    expect(versions.map((version) => version.kind).sort()).toEqual([
+      'input',
+      'output',
+      'stream',
+    ])
+    expect(first.changesWritten).toBe(3)
 
     const second = await syncProvider(deps, stubProvider(id, spec))
     expect(second.versionsAdded).toBe(0)
     expect(second.changesWritten).toBe(0)
     expect(
       (await providerEndpoints(deps.db, id))[0]?.responseContentTypes,
-    ).toEqual(['text/event-stream'])
+    ).toEqual(['application/json', 'text/event-stream'])
   })
 
   it.each([

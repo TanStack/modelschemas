@@ -47,11 +47,13 @@ interface LoadedEndpoint {
   method: string
   input?: unknown
   output?: unknown
+  /** SSE event schema when `output` is the JSON success body. */
+  streamSchema?: unknown
   /** Null means `application/json` (the column stays unset for that default). */
   requestContentType: string | null
   /**
-   * Null means a JSON success body. A stream is `text/event-stream` with
-   * no JSON sibling. Audio and octet-stream stay in the list.
+   * Null means a JSON success body. A stream stays in the list beside
+   * JSON. Audio and octet-stream stay in the list.
    */
   responseContentTypes: Array<string> | null
   specRevision: string | null
@@ -138,14 +140,38 @@ export function requestMedia(
   return { content: { [mediaType]: { schema } } }
 }
 
+function mediaTypeBase(value: string): string {
+  return value.split(';')[0]?.trim().toLowerCase() ?? ''
+}
+
+function isJsonMedia(mediaType: string): boolean {
+  const base = mediaTypeBase(mediaType)
+  return base === 'application/json' || base.endsWith('+json')
+}
+
+function isEventStreamMedia(mediaType: string): boolean {
+  const base = mediaTypeBase(mediaType)
+  return base === 'text/event-stream' || base.endsWith('/event-stream')
+}
+
 /**
- * Success response body. File-like types are binary even when the stored
- * schema is the JSON or SSE body. A stream list has no `application/json`
- * entry: hey-api prefers JSON and then parses the SSE body as one value.
+ * Path of the SSE twin of an operation that also returns JSON.
+ * The fragment is not part of the HTTP request, so a generated client
+ * still calls the real path and hey-api still emits an SSE method.
+ */
+export function streamOperationPath(path: string): string {
+  return `${path}#stream`
+}
+
+/**
+ * Success response body. File-like types are binary. `text/plain` is a
+ * string. `text/event-stream` uses `streamSchema` when the list also
+ * contains JSON, and never the JSON schema and never a made-up string.
  */
 export function responseMedia(
   schema: unknown,
   contentTypes: Array<string> | null | undefined,
+  streamSchema?: unknown,
 ): { content: Record<string, { schema: unknown }> } | undefined {
   const types =
     contentTypes && contentTypes.length > 0
@@ -154,17 +180,37 @@ export function responseMedia(
         ? []
         : ['application/json']
   if (types.length === 0) return undefined
+  const listedJson = types.some(isJsonMedia)
   const content: Record<string, { schema: unknown }> = {}
   for (const mediaType of types) {
     if (isFileLikeType(mediaType)) {
       content[mediaType] = { schema: BINARY_SCHEMA }
       continue
     }
-    content[mediaType] = {
-      schema: schema === undefined ? { type: 'string' } : schema,
+    if (isEventStreamMedia(mediaType)) {
+      const body =
+        streamSchema !== undefined
+          ? streamSchema
+          : listedJson
+            ? undefined
+            : schema
+      if (body === undefined) continue
+      content[mediaType] = { schema: body }
+      continue
     }
+    if (isJsonMedia(mediaType)) {
+      if (schema === undefined) continue
+      content[mediaType] = { schema }
+      continue
+    }
+    if (mediaTypeBase(mediaType).startsWith('text/')) {
+      content[mediaType] = { schema: { type: 'string' } }
+      continue
+    }
+    if (schema === undefined) continue
+    content[mediaType] = { schema }
   }
-  return { content }
+  return Object.keys(content).length > 0 ? { content } : undefined
 }
 
 function operationId(providerId: string, method: string, path: string): string {
@@ -282,14 +328,40 @@ async function loadEndpoints(
         specRevision: row.specRevision,
         ...(row.kind === 'input' ? { input: parsed } : {}),
         ...(row.kind === 'output' ? { output: parsed } : {}),
+        ...(row.kind === 'stream' ? { streamSchema: parsed } : {}),
       })
       continue
     }
     if (row.kind === 'input') existing.input = parsed
     if (row.kind === 'output') existing.output = parsed
+    if (row.kind === 'stream') existing.streamSchema = parsed
     if (existing.specRevision === null) existing.specRevision = row.specRevision
   }
   return [...byId.values()]
+}
+
+function contentTypesFor(
+  endpoint: LoadedEndpoint,
+  part: 'all' | 'body' | 'stream',
+): Array<string> | null {
+  const types = endpoint.responseContentTypes
+  if (part === 'stream') return ['text/event-stream']
+  if (part === 'body' && types) {
+    const rest = types.filter((type) => !isEventStreamMedia(type))
+    return rest.length > 0 ? rest : null
+  }
+  if (!types) return null
+  if (types.some(isJsonMedia) && endpoint.streamSchema === undefined) {
+    const rest = types.filter((type) => !isEventStreamMedia(type))
+    return rest.length > 0 ? rest : null
+  }
+  return types
+}
+
+function splitsStream(endpoint: LoadedEndpoint): boolean {
+  const types = endpoint.responseContentTypes
+  if (!types || endpoint.streamSchema === undefined) return false
+  return types.some(isJsonMedia) && types.some(isEventStreamMedia)
 }
 
 function buildOperation(
@@ -298,6 +370,8 @@ function buildOperation(
   connect: ProviderConnect,
   modelIds: Array<string>,
   pinnedModel: string | undefined,
+  path: string,
+  part: 'all' | 'body' | 'stream',
 ): Record<string, unknown> {
   const input = applyModelEnum(endpoint.input, modelIds)
   const parameters = [
@@ -308,19 +382,31 @@ function buildOperation(
     ? pinPathParams(parameters, pinnedModel)
     : parameters
   const body = requestMedia(input, endpoint.requestContentType)
+  const schema = part === 'stream' ? endpoint.streamSchema : endpoint.output
+  const media =
+    part === 'stream' || !connect.siblingGet
+      ? responseMedia(
+          schema,
+          contentTypesFor(endpoint, part),
+          endpoint.streamSchema,
+        )
+      : undefined
+  const summary =
+    part === 'stream'
+      ? endpoint.description
+        ? `${endpoint.description} (event stream)`
+        : 'Event stream'
+      : (endpoint.description ?? undefined)
   return {
-    operationId: operationId(providerId, 'post', endpoint.path),
-    summary: endpoint.description ?? undefined,
+    operationId: operationId(providerId, 'post', path),
+    summary,
     'x-modelschemas-activity': endpoint.activity,
     ...(pinned.length > 0 ? { parameters: pinned } : {}),
     ...(body ? { requestBody: { required: true, ...body } } : {}),
     responses: {
       '200': {
-        description: 'Success',
-        ...(connect.siblingGet
-          ? {}
-          : (responseMedia(endpoint.output, endpoint.responseContentTypes) ??
-            {})),
+        description: part === 'stream' ? 'Event stream' : 'Success',
+        ...media,
       },
     },
   }
@@ -347,10 +433,67 @@ function buildSiblingGet(
     responses: {
       '200': {
         description: 'Queued result',
-        ...responseMedia(endpoint.output, endpoint.responseContentTypes),
+        ...responseMedia(endpoint.output, contentTypesFor(endpoint, 'body')),
       },
     },
   }
+}
+
+export function operationsFor(
+  providerId: string,
+  endpoint: LoadedEndpoint,
+  connect: ProviderConnect,
+  modelIds: Array<string>,
+  pinnedModel: string | undefined,
+): Array<{
+  path: string
+  method: 'post' | 'get'
+  operation: Record<string, unknown>
+}> {
+  const split = splitsStream(endpoint)
+  const operations: Array<{
+    path: string
+    method: 'post' | 'get'
+    operation: Record<string, unknown>
+  }> = [
+    {
+      path: endpoint.path,
+      method: 'post',
+      operation: buildOperation(
+        providerId,
+        endpoint,
+        connect,
+        modelIds,
+        pinnedModel,
+        endpoint.path,
+        split ? 'body' : 'all',
+      ),
+    },
+  ]
+  if (split) {
+    const path = streamOperationPath(endpoint.path)
+    operations.push({
+      path,
+      method: 'post',
+      operation: buildOperation(
+        providerId,
+        endpoint,
+        connect,
+        modelIds,
+        pinnedModel,
+        path,
+        'stream',
+      ),
+    })
+  }
+  if (connect.siblingGet) {
+    operations.push({
+      path: siblingRequestPath(endpoint.path),
+      method: 'get',
+      operation: buildSiblingGet(providerId, endpoint),
+    })
+  }
+  return operations
 }
 
 /**
@@ -486,19 +629,17 @@ export async function assembleProviderOpenApi(
       ).models.map((m) => m.rawId)
   const paths: Record<string, Record<string, unknown>> = {}
   for (const endpoint of selected) {
-    const item = paths[endpoint.path] ?? {}
-    item.post = buildOperation(
+    for (const op of operationsFor(
       providerId,
       endpoint,
       connect,
       modelIds,
       pinnedModel,
-    )
-    if (connect.siblingGet) {
-      const siblingPath = siblingRequestPath(endpoint.path)
-      paths[siblingPath] = { get: buildSiblingGet(providerId, endpoint) }
+    )) {
+      const item = paths[op.path] ?? {}
+      item[op.method] = op.operation
+      paths[op.path] = item
     }
-    paths[endpoint.path] = item
   }
 
   const revision =

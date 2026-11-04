@@ -46,10 +46,16 @@ export interface ExtractedEndpointSchemas {
   /** Bundled output schema; absent for binary-media endpoints (TTS audio, …). */
   output?: Record<string, JsonValue>
   /**
-   * Success-response media types to publish on the generation OpenAPI.
-   * A stream is `text/event-stream` alone: `@hey-api/openapi-ts` prefers
-   * `application/json` when both are listed and then `JSON.parse`s the SSE
-   * body. Audio and other non-JSON types are kept (speech).
+   * Bundled SSE event schema, set only when the success body also has a
+   * JSON schema. The JSON schema stays `output`. Absent when the only
+   * stored body is already the stream schema (speech).
+   */
+  streamOutput?: Record<string, JsonValue>
+  /**
+   * Success-response media types to publish. JSON and `text/event-stream`
+   * are both kept. The generation document puts them on two operations,
+   * because `@hey-api/openapi-ts` keeps only `application/json` when both
+   * are listed on one operation. Audio and other non-JSON types stay.
    */
   outputContentTypes?: Array<string>
   warnings: Array<string>
@@ -286,23 +292,14 @@ function schemaHasBinary(node: JsonValue, depth = 0): boolean {
   return Object.values(node).some((value) => schemaHasBinary(value, depth + 1))
 }
 
-/** `stream: boolean` on the request body — the call can return SSE. */
-function declaresBooleanStream(schema: JsonValue | undefined): boolean {
-  if (!isObject(schema) || !isObject(schema.properties)) return false
-  const stream = schema.properties.stream
-  if (!isObject(stream)) return false
-  if (stream.type === 'boolean') return true
-  return Array.isArray(stream.type) && stream.type.includes('boolean')
-}
-
 /**
  * Content types to put on the generation document's success response.
- * See `ExtractedEndpointSchemas.outputContentTypes`.
+ * See `ExtractedEndpointSchemas.outputContentTypes`. A boolean `stream`
+ * field is not a media type: SSE is published only when the success
+ * body lists an event-stream type.
  */
 export function responseContentTypesFor(
   content: Record<string, MediaContent> | undefined,
-  input: JsonValue | undefined,
-  inferStream: boolean,
 ): Array<string> | undefined {
   if (!content) return undefined
   const types: Array<string> = []
@@ -310,19 +307,7 @@ export function responseContentTypesFor(
     const type = canonicalMediaType(raw)
     if (type !== '' && !types.includes(type)) types.push(type)
   }
-  if (types.length === 0) return undefined
-  const streams = types.filter(isEventStream)
-  const json = types.some(isJsonType)
-  if (streams.length > 0 && json) return [streams[0] ?? 'text/event-stream']
-  if (streams.length > 0) return types
-  if (
-    inferStream &&
-    declaresBooleanStream(input) &&
-    types.every((type) => isJsonType(type))
-  ) {
-    return ['text/event-stream']
-  }
-  return types
+  return types.length > 0 ? types : undefined
 }
 
 /**
@@ -333,9 +318,9 @@ export function responseContentTypesFor(
  * declaring both makes `@hey-api/openapi-ts` send the file as JSON.
  *
  * Output schema stays the JSON success body when one exists (200/201/202,
- * or the sibling GET for FAL). The published media types are separate:
- * a stream is `text/event-stream` rather than the JSON body the operation
- * also returns when `stream` is false.
+ * or the sibling GET for FAL). When that body also lists an event-stream
+ * schema, `streamOutput` is that schema. A boolean `stream` property does
+ * not invent a stream response.
  */
 export function extractEndpointSchemas(
   spec: OpenApiDocument,
@@ -428,16 +413,33 @@ export function extractEndpointSchemas(
     warnings.push(...bundled.warnings)
   }
 
-  const outputContentTypes = responseContentTypesFor(
-    bound?.content,
-    input,
-    strategy !== 'sibling-get',
-  )
+  let streamOutput: Record<string, JsonValue> | undefined
+  if (bound?.json && bound.stream?.schema !== undefined) {
+    const streamResolved = resolveContentSchema(
+      bound.stream,
+      components,
+      `${pathKey} stream`,
+      warnings,
+    )
+    if (streamResolved) {
+      const bundled = bundleSchema(
+        streamResolved.root,
+        components,
+        streamResolved.rootName,
+        `${pathKey} stream`,
+      )
+      streamOutput = bundled.schema
+      warnings.push(...bundled.warnings)
+    }
+  }
+
+  const outputContentTypes = responseContentTypesFor(bound?.content)
 
   return {
     ...(input ? { input } : {}),
     ...(inputContentType ? { inputContentType } : {}),
     ...(output ? { output } : {}),
+    ...(streamOutput ? { streamOutput } : {}),
     ...(outputContentTypes ? { outputContentTypes } : {}),
     warnings,
   }
