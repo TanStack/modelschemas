@@ -33,11 +33,6 @@ export async function contentHash(value: unknown): Promise<string> {
     .join('')
 }
 
-/** Key for an immutable schema blob, addressed by its content hash. */
-export function schemaKey(hash: string): string {
-  return `schema:${hash}`
-}
-
 export async function getJson<T>(
   kv: KVNamespace,
   key: string,
@@ -54,24 +49,4 @@ export async function putJson(
   options?: { expirationTtl?: number },
 ): Promise<void> {
   await kv.put(key, stableStringify(value), options)
-}
-
-/**
- * Store a JSON value under its content-hash key. Returns the hash so callers
- * can persist it (e.g. in a D1 `schema_versions` row) for later lookup.
- */
-export async function putByHash(
-  kv: KVNamespace,
-  value: unknown,
-): Promise<string> {
-  const hash = await contentHash(value)
-  await putJson(kv, schemaKey(hash), value)
-  return hash
-}
-
-export async function getByHash<T>(
-  kv: KVNamespace,
-  hash: string,
-): Promise<T | null> {
-  return getJson<T>(kv, schemaKey(hash))
 }

@@ -14,7 +14,7 @@ import {
   providers,
   schemaVersions,
 } from '../../db/schema.ts'
-import { getByHash } from '../kv.ts'
+
 import type { OpenApiDocument, ProviderConfig } from '../providers/types.ts'
 import { EXTRACTOR_VERSION } from './bundle.ts'
 import { MODELS_DEV_API_URL } from './retire-models-dev.ts'
@@ -156,7 +156,7 @@ describe('syncProvider', () => {
     const deps = await freshDeps(id)
     const db = deps.db
 
-    // First run: endpoint + input/output versions inserted, KV warmed.
+    // First run: endpoint + input/output versions inserted.
     const first = await syncProvider(deps, stubProvider(id, fixtureSpec(false)))
     expect(first.error).toBeUndefined()
     expect(first.endpointsSeen).toBe(1) // admin endpoint classified to null
@@ -180,9 +180,10 @@ describe('syncProvider', () => {
       .where(eq(schemaVersions.endpointId, `${id}/v1/messages`))
     expect(versions).toHaveLength(2)
     const inputVersion = versions.find((v) => v.kind === 'input')
-    expect(
-      await getByHash(env.SCHEMA_CACHE, inputVersion?.contentHash ?? ''),
-    ).toEqual({ type: 'object', properties: { model: { type: 'string' } } })
+    expect(JSON.parse(inputVersion?.schema ?? 'null')).toEqual({
+      type: 'object',
+      properties: { model: { type: 'string' } },
+    })
     // Provenance is recorded on every version.
     expect(inputVersion?.sourceUrl).toBe(STUB_SOURCE.url)
     expect(inputVersion?.sourceHash).toBe(STUB_SOURCE.hash)

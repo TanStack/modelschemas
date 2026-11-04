@@ -55,7 +55,7 @@ const getSchema = createServerFn({ method: 'GET' })
       return null
     }
     const result = await getEndpointSchema(
-      getDb(env),
+      getDb(env, { replica: true }),
       data.provider,
       data.activity as Activity,
       data.endpointId,

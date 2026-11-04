@@ -15,6 +15,14 @@
   "observability": {
     "enabled": true,
   },
+  // Workers Cache sits in front of fetch and honors Cache-Control.
+  // Catalog and schema GETs set s-maxage. The worker sets no-store on
+  // every other response so heuristic freshness cannot store them.
+  // An Authorization request bypasses this cache (Cloudflare's rule),
+  // so authenticated calls still hit the worker and the rate limit.
+  "cache": {
+    "enabled": true,
+  },
   "workers_dev": true,
   "routes": [{ "pattern": "modelschemas.com", "custom_domain": true }],
   "triggers": {
@@ -78,6 +86,10 @@
       "binding": "DB",
       "database_name": "modelschemas",
       "database_id": "557c12a0-dbad-4d46-8925-36315d8ecba9",
+      // Read replication is not a wrangler flag. Turn it on
+      // (`read_replication.mode: auto`) only after #554 recreates this
+      // database with a US primary. Public GETs already use
+      // withSession('first-unconstrained'); until then they run on the primary.
       "migrations_dir": "drizzle",
     },
   ],

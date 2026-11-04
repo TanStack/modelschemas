@@ -599,7 +599,9 @@ export const changesRelations = relations(changes, ({ one }) => ({
 }))
 
 // ---------------------------------------------------------------------------
-// Cache + delivery tables (PLAN.md task 1.2).
+// Bookkeeping rows (ingest records, completeness, webhook checkpoint, FAL
+// extract cursor). Not a response cache: public GETs read D1 and the edge.
+// `refreshing` remains from the retired KV freshness layer; nothing writes it.
 // ---------------------------------------------------------------------------
 
 export const cacheMeta = sqliteTable('cache_meta', {

@@ -1,11 +1,22 @@
 /**
- * HTTP cache semantics for read endpoints (PLAN.md task 3.2): `ETag`
- * (content hash), `Last-Modified`, `Cache-Control` with
- * stale-while-revalidate, `X-Fetched-At` / `X-Stale-At` (unix epoch
- * seconds), and `If-None-Match` → 304. Applied to every schema/model read
- * endpoint in Phase 4.
+ * HTTP cache semantics for read endpoints: `ETag` (content hash),
+ * `Last-Modified`, `Cache-Control` (`s-maxage` for Workers Cache, `max-age`
+ * for browsers), `X-Fetched-At` / `X-Stale-At` (unix epoch seconds), and
+ * `If-None-Match` → 304.
+ *
+ * Workers Cache (`cache.enabled` in wrangler.jsonc) stores a GET before
+ * the worker runs when the response is `public` with a freshness lifetime.
+ * `s-maxage` is that lifetime. It matches the 15-minute models poll for
+ * catalog and current schema reads. A `?version=<hash>` schema never
+ * changes, so it is cached for a year.
  */
 import { contentHash } from '#/server/kv.ts'
+
+/** Model lists move on the 15-minute poll. Spec sync is daily, so this is the tighter cron. */
+export const CATALOG_CACHE_SECONDS = 15 * 60
+
+/** Content-addressed schema versions do not change. */
+export const VERSIONED_SCHEMA_CACHE_SECONDS = 365 * 24 * 60 * 60
 
 export interface CacheHeaderOptions {
   /** Content hash to use as the ETag; computed from the body when omitted. */
@@ -14,12 +25,65 @@ export interface CacheHeaderOptions {
   fetchedAt: number
   /** Unix epoch seconds the value goes stale. */
   staleAt: number
-  /** Cache-Control max-age (seconds). */
+  /** Browser Cache-Control max-age (seconds). Defaults to the poll cadence. */
   maxAge?: number
-  /** Cache-Control stale-while-revalidate window (seconds). */
+  /**
+   * Shared-cache lifetime (seconds). Defaults to `maxAge`. Workers Cache
+   * honors this over `max-age`.
+   */
+  sMaxAge?: number
+  /** Cache-Control stale-while-revalidate window (seconds). Omitted when immutable. */
   staleWhileRevalidate?: number
+  /** Content-addressed body. Shared caches may keep it for `sMaxAge`. */
+  immutable?: boolean
   /** Defaults to application/json. */
   contentType?: string
+}
+
+/** Cache window for a catalog or current-schema read. */
+export function catalogCache(
+  now = Math.floor(Date.now() / 1000),
+): Pick<CacheHeaderOptions, 'fetchedAt' | 'staleAt' | 'maxAge' | 'sMaxAge'> {
+  return {
+    fetchedAt: now,
+    staleAt: now + CATALOG_CACHE_SECONDS,
+    maxAge: CATALOG_CACHE_SECONDS,
+    sMaxAge: CATALOG_CACHE_SECONDS,
+  }
+}
+
+/** Cache window for a schema read pinned to a content hash. */
+export function versionedSchemaCache(
+  createdAt: number,
+): Pick<
+  CacheHeaderOptions,
+  'fetchedAt' | 'staleAt' | 'maxAge' | 'sMaxAge' | 'immutable'
+> {
+  return {
+    fetchedAt: createdAt,
+    staleAt: createdAt + VERSIONED_SCHEMA_CACHE_SECONDS,
+    maxAge: VERSIONED_SCHEMA_CACHE_SECONDS,
+    sMaxAge: VERSIONED_SCHEMA_CACHE_SECONDS,
+    immutable: true,
+  }
+}
+
+function cacheControl(options: CacheHeaderOptions): string {
+  const maxAge = options.maxAge ?? CATALOG_CACHE_SECONDS
+  const sMaxAge = options.sMaxAge ?? maxAge
+  const parts = [
+    'public',
+    `max-age=${String(maxAge)}`,
+    `s-maxage=${String(sMaxAge)}`,
+  ]
+  if (options.immutable) {
+    parts.push('immutable')
+  } else {
+    parts.push(
+      `stale-while-revalidate=${String(options.staleWhileRevalidate ?? 600)}`,
+    )
+  }
+  return parts.join(', ')
 }
 
 function buildHeaders(
@@ -31,7 +95,7 @@ function buildHeaders(
     'Content-Type': contentType,
     ETag: `"${etag}"`,
     'Last-Modified': new Date(options.fetchedAt * 1000).toUTCString(),
-    'Cache-Control': `public, max-age=${String(options.maxAge ?? 60)}, stale-while-revalidate=${String(options.staleWhileRevalidate ?? 600)}`,
+    'Cache-Control': cacheControl(options),
     'X-Fetched-At': String(options.fetchedAt),
     'X-Stale-At': String(options.staleAt),
   })
@@ -90,6 +154,9 @@ function respond(
   const headers = buildHeaders(etag, options, contentType)
   if (ifNoneMatchSatisfied(request.headers.get('if-none-match'), etag)) {
     headers.delete('Content-Type')
+    // A 304 is not the representation. Workers Cache must not store it
+    // under the URL in place of the body.
+    headers.set('Cache-Control', 'private, no-store')
     return new Response(null, { status: 304, headers })
   }
   return new Response(body, { status: 200, headers })

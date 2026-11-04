@@ -1,12 +1,16 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { env, waitUntil } from 'cloudflare:workers'
+import { env } from 'cloudflare:workers'
 
 import { getDb } from '#/db/index.ts'
 import { activities } from '#/db/schema.ts'
 import type { Activity } from '#/db/schema.ts'
 import { jsonError } from '#/server/admin.ts'
-import { swr } from '#/server/cache.ts'
-import { cachedJson, cachedText } from '#/server/http-cache.ts'
+import {
+  cachedJson,
+  cachedText,
+  catalogCache,
+  versionedSchemaCache,
+} from '#/server/http-cache.ts'
 import { getModelDetail, listModelsCatalog } from '#/server/catalog.ts'
 import { getEndpointSchema, knownEndpointIds } from '#/server/schemas-api.ts'
 import { emitTypesModule, modelIdsKey, typesEtag } from '#/server/typegen.ts'
@@ -15,7 +19,7 @@ export const Route = createFileRoute('/v1/schemas/$provider/$activity/$')({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const db = getDb(env)
+        const db = getDb(env, { replica: true })
         if (!(activities as ReadonlyArray<string>).includes(params.activity)) {
           return jsonError(
             404,
@@ -52,23 +56,15 @@ export const Route = createFileRoute('/v1/schemas/$provider/$activity/$')({
           )
         }
 
-        // Versioned reads are immutable (content-addressed); current reads
-        // revalidate on the usual SWR cadence.
-        const result = await swr(
-          { db, kv: env.SCHEMA_CACHE, waitUntil },
-          `schema:${params.provider}:${activity}:${endpointId}:${kindParam}:${version ?? 'current'}`,
-          () =>
-            getEndpointSchema(
-              db,
-              params.provider,
-              activity,
-              endpointId,
-              kindParam,
-              version,
-            ),
-          { staleTime: version !== undefined ? 86_400 : 300 },
+        const value = await getEndpointSchema(
+          db,
+          params.provider,
+          activity,
+          endpointId,
+          kindParam,
+          version,
         )
-        if (result.value === null) {
+        if (value === null) {
           const valid = await knownEndpointIds(db, params.provider, activity)
           const model = await getModelDetail(db, params.provider, endpointId)
           const modelHint =
@@ -87,7 +83,7 @@ export const Route = createFileRoute('/v1/schemas/$provider/$activity/$')({
           )
         }
         if (format === 'types') {
-          const schema = result.value.schema
+          const schema = value.schema
           const record =
             typeof schema === 'object' &&
             schema !== null &&
@@ -116,37 +112,43 @@ export const Route = createFileRoute('/v1/schemas/$provider/$activity/$')({
                 ? matching
                 : catalog.models
           const modelIds =
-            result.value.aliasedFrom !== undefined
-              ? [result.value.aliasedFrom]
+            value.aliasedFrom !== undefined
+              ? [value.aliasedFrom]
               : overlayIds?.map((m) => m.rawId)
           const text = emitTypesModule({
             provider: params.provider,
-            endpointId: result.value.endpointId,
+            endpointId: value.endpointId,
             kind: kindParam,
-            contentHash: result.value.contentHash,
+            contentHash: value.contentHash,
             schema: record,
             optionalStyle,
             sourceUrl: `${url.origin}${url.pathname}?kind=${kindParam}`,
             ...(modelIds !== undefined ? { modelIds } : {}),
           })
+          const cache =
+            version !== undefined
+              ? versionedSchemaCache(value.createdAt)
+              : catalogCache()
           return cachedText(request, text, 'text/typescript; charset=utf-8', {
             etag: typesEtag(
-              result.value.contentHash,
+              value.contentHash,
               optionalStyle,
               modelIds !== undefined ? modelIdsKey(modelIds) : undefined,
             ),
-            fetchedAt: result.fetchedAt,
-            staleAt: result.staleAt,
+            ...cache,
           })
         }
-        return cachedJson(request, result.value, {
+        const cache =
+          version !== undefined
+            ? versionedSchemaCache(value.createdAt)
+            : catalogCache()
+        return cachedJson(request, value, {
           // Aliased (model-id) reads pin `model` on the body; hash that
           // view so two models sharing a route don't 304 each other.
-          ...(result.value.aliasedFrom === undefined
-            ? { etag: result.value.contentHash }
+          ...(value.aliasedFrom === undefined
+            ? { etag: value.contentHash }
             : {}),
-          fetchedAt: result.fetchedAt,
-          staleAt: result.staleAt,
+          ...cache,
         })
       },
     },

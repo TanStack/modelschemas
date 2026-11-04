@@ -37,7 +37,7 @@ const getDashboardData = createServerFn({ method: 'GET' }).handler(
     const { getServiceStatus } = await import('#/server/status.ts')
     const { listChanges } = await import('#/server/changes-api.ts')
 
-    const db = getDb(env)
+    const db = getDb(env, { replica: true })
     const [status, changesOutcome] = await Promise.all([
       getServiceStatus(db),
       // Updates are mostly router prices moving poll to poll; additions

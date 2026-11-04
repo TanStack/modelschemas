@@ -63,11 +63,26 @@ function isCorsReadPath(pathname: string): boolean {
   )
 }
 
-function withCors(response: Response): Response {
+function finalize(response: Response, cors: boolean): Response {
   // New Response: framework responses can carry immutable headers.
-  const wrapped = new Response(response.body, response)
-  wrapped.headers.set('Access-Control-Allow-Origin', '*')
-  return wrapped
+  const headers = new Headers(response.headers)
+  if (cors) headers.set('Access-Control-Allow-Origin', '*')
+  // Workers Cache applies heuristic freshness to a GET with no
+  // Cache-Control. Catalog and schema reads opt in with s-maxage.
+  // Everything else (changes, status, auth, HTML) must not be stored.
+  const cacheControl = headers.get('cache-control') ?? ''
+  if (
+    !cacheControl.includes('s-maxage=') &&
+    !cacheControl.includes('no-store') &&
+    !cacheControl.includes('private')
+  ) {
+    headers.set('Cache-Control', 'no-store')
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
 }
 
 export default {
@@ -104,27 +119,27 @@ export default {
         env.SCHEMA_CACHE,
         request,
       )
-      if (limited) return corsRead ? withCors(limited) : limited
+      if (limited) return finalize(limited, corsRead)
     }
     // Narrative API root (task 11.2): JSON-accepting GET / gets the MCP
     // initialize instructions document instead of the SSR landing page.
     if (pathname === '/' && wantsJsonRoot(request)) {
       const body = Response.json(narrativeRoot(url.origin))
       body.headers.set('Vary', 'Accept')
-      return body
+      return finalize(body, corsRead)
     }
     // Markdown content negotiation (task 10.5): Accept: text/markdown on an
     // HTML page returns markdown instead of SSR.
     if (wantsMarkdown(request)) {
       const md = markdownForPath(pathname, url.origin)
-      if (md !== null) return markdownResponse(md)
+      if (md !== null) return finalize(markdownResponse(md), false)
     }
     // TanStack Start's handler takes (request, opts?) — bindings flow in via
     // the cloudflare:workers env module, not handler arguments. HTML pages
     // get RFC 8288 discovery Link headers (task 10.2).
     void ctx
     const response = withDiscoveryLinks(await serverEntry.fetch(request))
-    return corsRead ? withCors(response) : response
+    return finalize(response, corsRead)
   },
 
   scheduled(

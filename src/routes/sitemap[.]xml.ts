@@ -8,9 +8,12 @@ export const Route = createFileRoute('/sitemap.xml')({
   server: {
     handlers: {
       GET: async () =>
-        new Response(await sitemapXml(getDb(env), env.BETTER_AUTH_URL), {
-          headers: { 'Content-Type': 'application/xml; charset=utf-8' },
-        }),
+        new Response(
+          await sitemapXml(getDb(env, { replica: true }), env.BETTER_AUTH_URL),
+          {
+            headers: { 'Content-Type': 'application/xml; charset=utf-8' },
+          },
+        ),
     },
   },
 })
