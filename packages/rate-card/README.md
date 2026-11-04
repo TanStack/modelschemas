@@ -155,4 +155,4 @@ tiers (strictly greater than the threshold); time-window overrides are not
 applied (the card quotes the base rate).
 
 Docs: [modelschemas.com/docs](https://modelschemas.com/docs) · Source:
-[github.com/modelschemas/modelschemas](https://github.com/modelschemas/modelschemas)
+[github.com/TanStack/modelschemas](https://github.com/TanStack/modelschemas)

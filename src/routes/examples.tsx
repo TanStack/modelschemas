@@ -7,7 +7,7 @@ export const Route = createFileRoute('/examples')({
   component: Examples,
 })
 
-const CLONE_SNIPPET = `git clone https://github.com/modelschemas/modelschemas
+const CLONE_SNIPPET = `git clone https://github.com/TanStack/modelschemas
 cd modelschemas && bun install
 cd examples/schema-studio && bun run dev`
 
