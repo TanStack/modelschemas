@@ -266,7 +266,7 @@ configuration with an error.
 1. Create resources and put their IDs in `wrangler.jsonc`:
 
    ```bash
-   bunx wrangler d1 create modelschemas        # → d1_databases[0].database_id
+   bunx wrangler d1 create modelschemas-us --location enam   # → d1_databases[0].database_id
    bunx wrangler kv namespace create SCHEMA_CACHE  # → kv_namespaces[0].id
    ```
 
@@ -354,7 +354,7 @@ Settings:
 
 - **Build command:** `bun run build`
 - **Deploy command:** `bun run deploy:ci` — applies pending D1 migrations
-  (`wrangler d1 migrations apply modelschemas --remote`, by database name so
+  (`wrangler d1 migrations apply modelschemas-us --remote`, by database name so
   a binding rename can't retarget it) and then `wrangler deploy`, which
   follows the build-emitted redirect (`.wrangler/deploy/config.json`) to the
   real worker config at `dist/server/wrangler.json`. Deploying the repo-root

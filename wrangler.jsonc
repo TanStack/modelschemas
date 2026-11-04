@@ -76,8 +76,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "modelschemas",
-      "database_id": "557c12a0-dbad-4d46-8925-36315d8ecba9",
+      "database_name": "modelschemas-us",
+      "database_id": "21cbfe2e-5a9d-41a8-929e-74089a08230b",
       "migrations_dir": "drizzle",
     },
   ],
