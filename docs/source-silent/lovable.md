@@ -1,0 +1,2 @@
+- lovable: priced — GET https://ai.gateway.lovable.dev/v1/models prices every model in Lovable credits (`pricing.cost_currency: credits`) and the docs state no USD rate per credit, only that rates follow the underlying provider, https://docs.lovable.dev/features/ai#usage-and-pricing, checked 2026-11-04
+- lovable: cacheRead — same listing, credits only, https://docs.lovable.dev/features/ai#usage-and-pricing, checked 2026-11-04

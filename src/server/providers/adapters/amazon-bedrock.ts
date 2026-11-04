@@ -19,7 +19,6 @@ import type { BedrockServiceModel } from '../bedrock-sdk-spec.ts'
 import { loadBedrockConverseWireMaps } from '../bedrock-converse-facts.ts'
 import { loadBedrockThinkingGuides } from '../bedrock-thinking-guides.ts'
 import { docsRun, docsReport } from '../model-facts.ts'
-import { bearerConnect } from '../connect.ts'
 import { fetchText, sha256Text } from '../types.ts'
 import type {
   ListModelsResult,
@@ -63,11 +62,38 @@ export const provider: ProviderConfig = {
   specSourceUrl: BEDROCK_SDK_MODEL_URL,
   modelsEndpoint: BEDROCK_CARDS_URL,
   defaultDerivation: 'generated',
-  // A Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`); SigV4 also works.
-  connect: bearerConnect(
-    'https://bedrock-runtime.us-east-1.amazonaws.com',
-    'Regional: replace us-east-1 with the Region you call.',
-  ),
+  // Converse is an AWS API: requests are SigV4-signed (service `bedrock`).
+  // A Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) is the stated alternative.
+  connect: {
+    servers: [
+      {
+        url: 'https://bedrock-runtime.{region}.amazonaws.com',
+        variables: {
+          region: {
+            default: 'us-east-1',
+            description: 'The AWS Region you call.',
+          },
+        },
+      },
+    ],
+    securitySchemes: {
+      sigv4: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'Authorization',
+        'x-amazon-apigateway-authtype': 'awsSigv4',
+        description:
+          'AWS Signature Version 4 with service `bedrock` and the Region in the URL; a generated HTTP client cannot sign this itself, so route through an AWS SDK or a SigV4 signer.',
+      },
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        description:
+          'A Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) as `Authorization: Bearer <key>`.',
+      },
+    },
+    security: [{ sigv4: [] }, { bearerAuth: [] }],
+  },
   fetchSpec,
   listModels,
   classify: (path): Activity | null =>

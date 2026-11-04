@@ -11,6 +11,7 @@ import {
   OPENCODE_PRICING_URL,
 } from '../opencode-pricing.ts'
 import { fetchJson } from '../types.ts'
+import { bearerConnect } from '../connect.ts'
 import type { RateCard } from '@modelschemas/rate-card'
 import type {
   ListModelsResult,
@@ -122,6 +123,7 @@ export const provider: ProviderConfig = {
   specSourceUrl: OPENCODE_CATALOG_URL,
   modelsEndpoint: OPENCODE_MODELS_URL,
   defaultDerivation: 'docs-derived',
+  connect: bearerConnect('https://opencode.ai', 'OpenCode Zen'),
   bindSyncedRoutesOnly: true,
   bindStoredRoutesWithoutSchemas: true,
   fetchSpec,

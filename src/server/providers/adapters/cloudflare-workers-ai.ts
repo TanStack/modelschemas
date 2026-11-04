@@ -32,6 +32,7 @@ import type {
   ThinkingRequest,
 } from '../request-map.ts'
 import { fetchText, sha256Text } from '../types.ts'
+import { bearerConnect } from '../connect.ts'
 import type {
   FactSource,
   ListModelsResult,
@@ -534,6 +535,10 @@ export const provider: ProviderConfig = {
   modelsEndpoint: WORKERS_AI_MODELS_URL,
   // The per-model schemas are Cloudflare's own, re-fetched every sync.
   defaultDerivation: 'upstream-spec',
+  connect: bearerConnect(
+    'https://api.cloudflare.com/client/v4',
+    'Account-scoped: {account_id} is a path parameter on every route.',
+  ),
   // A model listed today has no synced schema until the next daily sync.
   bindSyncedRoutesOnly: true,
   fetchSpec,
