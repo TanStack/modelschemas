@@ -201,12 +201,14 @@ export function parseGemmaModalities(
 /**
  * Throws when the fetch fails or the body is not the deprecations page.
  * A real page that names no automatic route returns `{}`, and the poll
- * may then clear those cards.
+ * may then clear those cards. `geminiModelPricing` loads this through
+ * `tryDocs`, so a throw keeps stored cards instead of failing the poll.
  */
 export async function geminiAutomaticRoutes(
   kv?: KVNamespace,
+  cached: typeof cachedDocs = cachedDocs,
 ): Promise<Record<string, string>> {
-  const doc = await cachedDocs(kv, GEMINI_DEPRECATIONS_URL, async () => {
+  const doc = await cached(kv, GEMINI_DEPRECATIONS_URL, async () => {
     const markdown = await fetchText(GEMINI_DEPRECATIONS_URL)
     if (!markdown.includes(DEPRECATIONS_MARK)) {
       throw new Error(
