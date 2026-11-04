@@ -11,8 +11,8 @@ export interface GetDbOptions {
    * Public read. Opens a D1 session with `first-unconstrained`, so the
    * query can run on a read replica once read replication is enabled.
    * Sessions are safe before that: every query still goes to the primary.
-   * Enable replication on the database only after #554, so replicas copy
-   * the US primary (`read_replication.mode: auto` in the dashboard or API).
+   * The primary is ENAM (#554); enable replication with
+   * `read_replication.mode: auto` in the dashboard or API.
    * There is no wrangler.jsonc switch for it.
    *
    * Leave this off for auth, admin, subscriptions, crons, webhooks, and

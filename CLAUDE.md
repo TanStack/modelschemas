@@ -8,7 +8,7 @@ A Cloudflare Workers service giving AI agents live access to model schemas:
 per-endpoint request/response JSON Schemas and model metadata for 8 monitored
 providers (OpenAI, Anthropic, Gemini, xAI Grok, ElevenLabs, OpenRouter, FAL,
 BytePlus),
-with a D1 read session on public GETs (replicas after #554's US
+with a D1 read session on public GETs (replicas once the ENAM
 primary has `read_replication.mode: auto`; the session still hits the
 primary until then), Workers Cache on the `CachedReads` entrypoint
 (`max-age` matched to the 15-minute poll; versioned schemas cached for a

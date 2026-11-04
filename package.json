@@ -18,7 +18,7 @@
     "format": "oxfmt && oxlint --type-aware --fix",
     "check": "oxfmt --check",
     "deploy": "bun run build && bun run deploy:ci",
-    "deploy:ci": "wrangler d1 migrations apply modelschemas --remote && wrangler deploy",
+    "deploy:ci": "wrangler d1 migrations apply modelschemas-us --remote && wrangler deploy",
     "seed": "bun scripts/seed.ts",
     "secrets:check": "bun scripts/push-secrets.ts",
     "secrets:push": "bun scripts/push-secrets.ts --push",

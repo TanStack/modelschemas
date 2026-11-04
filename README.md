@@ -6,8 +6,8 @@ request/response JSON Schemas and model metadata for monitored providers
 with public GETs on a D1 read session and edge caching (`max-age` of
 15 minutes on catalog and current schema reads; a year on
 `?version=<hash>`; purged after an admin sync). Turn on D1 read replication
-(`read_replication.mode: auto`) only after #554 recreates the database
-with a US primary; until then the session still reads the primary.
+(`read_replication.mode: auto`) on the ENAM primary (#554); until it is
+on, the session still reads the primary.
 Automatic refresh — model lists every 15 minutes, full OpenAPI spec
 syncs daily. KV holds rate-limit counters and the docs cache the crons use.
 
@@ -291,7 +291,7 @@ configuration with an error.
 1. Create resources and put their IDs in `wrangler.jsonc`:
 
    ```bash
-   bunx wrangler d1 create modelschemas        # → d1_databases[0].database_id
+   bunx wrangler d1 create modelschemas-us --location enam   # → d1_databases[0].database_id
    bunx wrangler kv namespace create SCHEMA_CACHE  # → kv_namespaces[0].id
    ```
 
@@ -382,7 +382,7 @@ Settings:
 
 - **Build command:** `bun run build`
 - **Deploy command:** `bun run deploy:ci` — applies pending D1 migrations
-  (`wrangler d1 migrations apply modelschemas --remote`, by database name so
+  (`wrangler d1 migrations apply modelschemas-us --remote`, by database name so
   a binding rename can't retarget it) and then `wrangler deploy`, which
   follows the build-emitted redirect (`.wrangler/deploy/config.json`) to the
   real worker config at `dist/server/wrangler.json`. Deploying the repo-root

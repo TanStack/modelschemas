@@ -89,12 +89,12 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "modelschemas",
-      "database_id": "557c12a0-dbad-4d46-8925-36315d8ecba9",
-      // Read replication is not a wrangler flag. Turn it on
-      // (`read_replication.mode: auto`) only after #554 recreates this
-      // database with a US primary. Public GETs already use
-      // withSession('first-unconstrained'); until then they run on the primary.
+      "database_name": "modelschemas-us",
+      "database_id": "21cbfe2e-5a9d-41a8-929e-74089a08230b",
+      // The primary is ENAM (#554). Read replication is not a wrangler
+      // flag: turn it on with `read_replication.mode: auto` in the
+      // dashboard or API. Public GETs already use
+      // withSession('first-unconstrained'); until it is on they run on the primary.
       "migrations_dir": "drizzle",
     },
   ],
