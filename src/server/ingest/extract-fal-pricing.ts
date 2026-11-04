@@ -248,7 +248,9 @@ function logFetchFailure(
 
 function parseJsonObject(text: string): unknown {
   const trimmed = text.trim()
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed)
+  // The model often explains itself before the fence; a fence anywhere
+  // is the reply (#552 — the repair turn was paying for the prose).
+  const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(trimmed)
   const body = fenced?.[1] ?? trimmed
   return JSON.parse(body) as unknown
 }
