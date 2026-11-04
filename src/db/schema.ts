@@ -501,6 +501,20 @@ export const endpoints = sqliteTable(
     method: text('method').notNull(),
     path: text('path').notNull(),
     description: text('description'),
+    /**
+     * Request media type when it is not `application/json` (a file upload
+     * is `multipart/form-data`). Null means JSON, including rows synced
+     * before the column existed.
+     */
+    requestContentType: text('request_content_type'),
+    /**
+     * Success-response media types when they are not a single JSON body.
+     * A stream is `["text/event-stream"]` with no JSON sibling. Null means
+     * `application/json`.
+     */
+    responseContentTypes: text('response_content_types', {
+      mode: 'json',
+    }).$type<Array<string> | null>(),
   },
   (table) => [index('endpoints_providerId_idx').on(table.providerId)],
 )

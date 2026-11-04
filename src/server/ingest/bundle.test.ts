@@ -126,17 +126,73 @@ describe('extractEndpointSchemas', () => {
       '/v1/audio/transcriptions',
     )
     expect(result.input).toBeDefined()
+    expect(result.inputContentType).toBe('multipart/form-data')
     expect(
       (result.input!.properties as Record<string, Record<string, unknown>>).file
         ?.format,
     ).toBe('binary')
     expect(result.output).toBeDefined()
+    expect(result.outputContentTypes).toEqual(['application/json'])
   })
 
-  it('omits output for binary-media endpoints', () => {
+  it('omits output for binary-media endpoints and keeps the audio type', () => {
     const result = extractEndpointSchemas(fixtureSpec(), '/v1/audio/speech')
     expect(result.input).toBeDefined()
+    expect(result.inputContentType).toBe('application/json')
     expect(result.output).toBeUndefined()
+    expect(result.outputContentTypes).toEqual(['audio/mpeg'])
+  })
+
+  it('publishes text/event-stream alone when the success body also has JSON', () => {
+    const spec = structuredClone(fixtureSpec())
+    const post = spec.paths?.['/v1/messages']?.post as
+      | {
+          responses?: Record<string, { content?: Record<string, unknown> }>
+        }
+      | undefined
+    const ok = post?.responses?.['200']
+    if (!ok?.content) throw new Error('fixture missing /v1/messages')
+    ok.content['text/event-stream'] = ok.content['application/json']
+    const result = extractEndpointSchemas(spec, '/v1/messages')
+    expect(result.inputContentType).toBe('application/json')
+    expect(result.outputContentTypes).toEqual(['text/event-stream'])
+    expect(result.output?.type).toBe('object')
+  })
+
+  it('publishes text/event-stream when the request declares stream and the spec lists only JSON', () => {
+    const spec = structuredClone(fixtureSpec())
+    const create = spec.components?.schemas?.CreateMessage as
+      | { properties?: Record<string, unknown> }
+      | undefined
+    if (!create?.properties) throw new Error('fixture missing CreateMessage')
+    create.properties.stream = { type: 'boolean' }
+    const result = extractEndpointSchemas(spec, '/v1/messages')
+    expect(result.outputContentTypes).toEqual(['text/event-stream'])
+  })
+
+  it('keeps audio types beside an event stream when the success body is not JSON', () => {
+    const spec = structuredClone(fixtureSpec())
+    const post = spec.paths?.['/v1/audio/speech']?.post as
+      | {
+          responses?: Record<string, { content?: Record<string, unknown> }>
+        }
+      | undefined
+    const ok = post?.responses?.['200']
+    if (!ok) throw new Error('fixture missing speech')
+    ok.content = {
+      'application/octet-stream': { schema: { type: 'string' } },
+      'audio/mpeg': { schema: { type: 'string' } },
+      'text/event-stream': {
+        schema: { $ref: '#/components/schemas/Message' },
+      },
+    }
+    const result = extractEndpointSchemas(spec, '/v1/audio/speech')
+    expect(result.outputContentTypes).toEqual([
+      'application/octet-stream',
+      'audio/mpeg',
+      'text/event-stream',
+    ])
+    expect(result.output?.type).toBe('object')
   })
 
   it('uses the sibling GET for the sibling-get strategy', () => {

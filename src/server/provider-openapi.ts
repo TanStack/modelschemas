@@ -47,6 +47,13 @@ interface LoadedEndpoint {
   method: string
   input?: unknown
   output?: unknown
+  /** Null means `application/json` (the column stays unset for that default). */
+  requestContentType: string | null
+  /**
+   * Null means a JSON success body. A stream is `text/event-stream` with
+   * no JSON sibling. Audio and octet-stream stay in the list.
+   */
+  responseContentTypes: Array<string> | null
   specRevision: string | null
 }
 
@@ -107,11 +114,57 @@ function pinPathParams(
   })
 }
 
-function media(
+function isFileLikeType(mediaType: string): boolean {
+  return (
+    mediaType === 'application/octet-stream' ||
+    mediaType.startsWith('audio/') ||
+    mediaType.startsWith('image/') ||
+    mediaType.startsWith('video/')
+  )
+}
+
+const BINARY_SCHEMA = { type: 'string', format: 'binary' } as const
+
+/**
+ * Request body for the generation document. A missing type is JSON, which
+ * is how rows synced before content types were recorded are assembled.
+ */
+export function requestMedia(
   schema: unknown,
-): { content: { 'application/json': { schema: unknown } } } | undefined {
+  contentType: string | null | undefined,
+): { content: Record<string, { schema: unknown }> } | undefined {
   if (schema === undefined) return undefined
-  return { content: { 'application/json': { schema } } }
+  const mediaType = contentType || 'application/json'
+  return { content: { [mediaType]: { schema } } }
+}
+
+/**
+ * Success response body. File-like types are binary even when the stored
+ * schema is the JSON or SSE body. A stream list has no `application/json`
+ * entry: hey-api prefers JSON and then parses the SSE body as one value.
+ */
+export function responseMedia(
+  schema: unknown,
+  contentTypes: Array<string> | null | undefined,
+): { content: Record<string, { schema: unknown }> } | undefined {
+  const types =
+    contentTypes && contentTypes.length > 0
+      ? contentTypes
+      : schema === undefined
+        ? []
+        : ['application/json']
+  if (types.length === 0) return undefined
+  const content: Record<string, { schema: unknown }> = {}
+  for (const mediaType of types) {
+    if (isFileLikeType(mediaType)) {
+      content[mediaType] = { schema: BINARY_SCHEMA }
+      continue
+    }
+    content[mediaType] = {
+      schema: schema === undefined ? { type: 'string' } : schema,
+    }
+  }
+  return { content }
 }
 
 function operationId(providerId: string, method: string, path: string): string {
@@ -188,6 +241,8 @@ async function loadEndpoints(
       activity: endpoints.activity,
       description: endpoints.description,
       method: endpoints.method,
+      requestContentType: endpoints.requestContentType,
+      responseContentTypes: endpoints.responseContentTypes,
       kind: schemaVersions.kind,
       schema: schemaVersions.schema,
       specRevision: schemaVersions.specRevision,
@@ -222,6 +277,8 @@ async function loadEndpoints(
         activity: row.activity,
         description: row.description,
         method: row.method,
+        requestContentType: row.requestContentType,
+        responseContentTypes: row.responseContentTypes,
         specRevision: row.specRevision,
         ...(row.kind === 'input' ? { input: parsed } : {}),
         ...(row.kind === 'output' ? { output: parsed } : {}),
@@ -250,7 +307,7 @@ function buildOperation(
   const pinned = pinnedModel
     ? pinPathParams(parameters, pinnedModel)
     : parameters
-  const body = media(input)
+  const body = requestMedia(input, endpoint.requestContentType)
   return {
     operationId: operationId(providerId, 'post', endpoint.path),
     summary: endpoint.description ?? undefined,
@@ -260,7 +317,10 @@ function buildOperation(
     responses: {
       '200': {
         description: 'Success',
-        ...(connect.siblingGet ? {} : (media(endpoint.output) ?? {})),
+        ...(connect.siblingGet
+          ? {}
+          : (responseMedia(endpoint.output, endpoint.responseContentTypes) ??
+            {})),
       },
     },
   }
@@ -287,7 +347,7 @@ function buildSiblingGet(
     responses: {
       '200': {
         description: 'Queued result',
-        ...media(endpoint.output),
+        ...responseMedia(endpoint.output, endpoint.responseContentTypes),
       },
     },
   }

@@ -5,6 +5,8 @@ import {
   endpointMatchesModel,
   headerParams,
   pathParamsFromPath,
+  requestMedia,
+  responseMedia,
 } from './provider-openapi.ts'
 import { falProvider } from './providers/fal.ts'
 import { anthropicProvider } from './providers/anthropic.ts'
@@ -73,6 +75,48 @@ describe('applyModelEnum', () => {
     })
     expect(applyModelEnum({ type: 'string' }, ['x'])).toEqual({
       type: 'string',
+    })
+  })
+})
+
+describe('generation media types', () => {
+  const schema = { type: 'object', properties: { id: { type: 'string' } } }
+
+  it('defaults a recorded-before-content-types schema to JSON', () => {
+    expect(requestMedia(schema, null)).toEqual({
+      content: { 'application/json': { schema } },
+    })
+    expect(responseMedia(schema, null)).toEqual({
+      content: { 'application/json': { schema } },
+    })
+    expect(requestMedia(undefined, 'multipart/form-data')).toBeUndefined()
+    expect(responseMedia(undefined, null)).toBeUndefined()
+  })
+
+  it('sends a file upload as multipart and a stream as event-stream', () => {
+    expect(requestMedia(schema, 'multipart/form-data')).toEqual({
+      content: { 'multipart/form-data': { schema } },
+    })
+    expect(responseMedia(schema, ['text/event-stream'])).toEqual({
+      content: { 'text/event-stream': { schema } },
+    })
+  })
+
+  it('describes audio responses as binary and keeps a stream schema beside them', () => {
+    expect(
+      responseMedia(schema, [
+        'application/octet-stream',
+        'audio/mpeg',
+        'text/event-stream',
+      ]),
+    ).toEqual({
+      content: {
+        'application/octet-stream': {
+          schema: { type: 'string', format: 'binary' },
+        },
+        'audio/mpeg': { schema: { type: 'string', format: 'binary' } },
+        'text/event-stream': { schema },
+      },
     })
   })
 })

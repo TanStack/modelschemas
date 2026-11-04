@@ -85,6 +85,10 @@ export interface ClassifiedEndpoint {
   verifiedAt: string | null
   input?: Record<string, JsonValue>
   output?: Record<string, JsonValue>
+  /** Set only when the body is not `application/json`. */
+  requestContentType: string | null
+  /** Set only when the success body is not a single JSON media type. */
+  responseContentTypes: Array<string> | null
   /** WMA AsyncAPI — catalog flag; skip HTTP OpenAPI assembly. */
   asyncapi?: boolean
 }
@@ -187,6 +191,12 @@ export function classifyAndBundle(
           verifiedAt,
           input: extracted.input,
           output: extracted.output,
+          requestContentType: storedRequestContentType(
+            extracted.inputContentType,
+          ),
+          responseContentTypes: storedResponseContentTypes(
+            extracted.outputContentTypes,
+          ),
         })
       }
     }
@@ -233,8 +243,35 @@ function classifiedFromBundled(
     verifiedAt: extra.verifiedAt ?? null,
     input,
     output,
+    requestContentType: null,
+    responseContentTypes: null,
     asyncapi: extra.asyncapi,
   }
+}
+
+/** JSON is the column default, stored as null so a sync does not rewrite every row. */
+function storedRequestContentType(type: string | undefined): string | null {
+  if (!type || type === 'application/json') return null
+  return type
+}
+
+function storedResponseContentTypes(
+  types: Array<string> | undefined,
+): Array<string> | null {
+  if (!types || types.length === 0) return null
+  if (types.length === 1 && types[0] === 'application/json') return null
+  return types
+}
+
+function sameContentTypes(
+  left: Array<string> | null | undefined,
+  right: Array<string> | null,
+): boolean {
+  const a = left ?? null
+  if (a === null || right === null) return a === right
+  return (
+    a.length === right.length && a.every((type, index) => type === right[index])
+  )
 }
 
 async function applyAsyncApiCatalogFlags(
@@ -431,6 +468,8 @@ export async function syncProvider(
           method: endpoint.method,
           path: endpoint.path,
           description: endpoint.description,
+          requestContentType: endpoint.requestContentType,
+          responseContentTypes: endpoint.responseContentTypes,
         }),
         db.insert(changes).values({
           id: newChangeId(),
@@ -444,13 +483,20 @@ export async function syncProvider(
       outcome.changesWritten++
     } else if (
       existing.activity !== endpoint.activity ||
-      existing.description !== endpoint.description
+      existing.description !== endpoint.description ||
+      existing.requestContentType !== endpoint.requestContentType ||
+      !sameContentTypes(
+        existing.responseContentTypes,
+        endpoint.responseContentTypes,
+      )
     ) {
       await db
         .update(endpoints)
         .set({
           activity: endpoint.activity,
           description: endpoint.description,
+          requestContentType: endpoint.requestContentType,
+          responseContentTypes: endpoint.responseContentTypes,
         })
         .where(eq(endpoints.id, endpoint.dbId))
     }
