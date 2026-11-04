@@ -91,7 +91,11 @@ const extractedBodySchema = rateCardSchema.omit({ source: true }).extend({
 })
 
 const extractedResponseSchema = z.union([
-  z.object({ unverified: z.literal(true) }),
+  // expiresAt: the section's only price is a promo that ended then (#552).
+  z.object({
+    unverified: z.literal(true),
+    expiresAt: z.iso.datetime().optional(),
+  }),
   extractedBodySchema,
 ])
 
@@ -260,7 +264,7 @@ function parseJsonObject(text: string): unknown {
 
 export const EXTRACT_SYSTEM = `You write a modelschemas RateCard — a price calculator — from a FAL model's llms.txt Pricing section.
 Return JSON only: {"inputs": {...}, "tables": {...}, "price": <JSONLogic>, "examples": [...]}, optionally "expiresAt" (ISO datetime) when the text names a promo end. Do not include a source object.
-A promo whose end is before today (the message states today) is over: price at the regular rate the text states, with no expiresAt; if it states no regular rate, return {"unverified": true}.
+A promo whose end is before today (the message states today) is over: price at the regular rate the text states, with no expiresAt; if it states no regular rate, return {"unverified": true, "expiresAt": <the promo end>}.
 
 inputs: name → {"param": <field>, "kind": "number"|"enum"|"boolean"|"count", "bound": "request"|"usage", "default"?: ..., "values"?: [...] (enum only)}.
 - A request-bound param MUST be one of the allowed request properties (or a dotted child of one). Give it a default when the request may omit it.
@@ -333,11 +337,19 @@ export function checkExtractedCard(
   }
   const priced = !isStubPricingSection(args.pricingText)
   if ('unverified' in parsed.data || parsed.data.examples.length === 0) {
-    return priced
+    // An ended promo with no regular rate stated is no price: the reply
+    // names the end and the clock agrees (#552).
+    const ended =
+      'unverified' in parsed.data &&
+      parsed.data.expiresAt !== undefined &&
+      Date.parse(parsed.data.expiresAt) <= args.now * 1000
+    return priced && !ended
       ? {
           error: `the section names ${usdAmounts(args.pricingText)
             .map((usd) => `$${usd}`)
-            .join(', ')}; write the card with one example per quoted rate`,
+            .join(
+              ', ',
+            )}; write the card with one example per quoted rate, or {"unverified": true, "expiresAt": <end>} if its only price is a promo that has ended`,
         }
       : 'unverified'
   }

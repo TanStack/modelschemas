@@ -451,6 +451,27 @@ Limited-time promo (50% off) until **October 31, 2026**: speech costs **$0.015**
     )
   })
 
+  it('takes unverified for an ended promo that states no regular rate (#552)', async () => {
+    const promoOnly = promoSection.replace(' (regular price: $0.03)', '')
+    const ended = { unverified: true, expiresAt: promoCard.expiresAt }
+    // Over: the section states no current price.
+    const over = gatewayReplies(ended)
+    await expect(
+      extract(
+        { ...args, pricingText: promoOnly, now: Date.UTC(2026, 10, 4) / 1000 },
+        over,
+      ),
+    ).resolves.toBe('unverified')
+    expect(over).toHaveBeenCalledTimes(1)
+    // Still running: the promo card is the price, so unverified is refused.
+    const live = gatewayReplies(ended, promoCard)
+    const card = await extract({ ...args, pricingText: promoOnly }, live)
+    expect(card).toMatchObject({ source: { expiresAt: promoCard.expiresAt } })
+    expect(textOf(runInput(live, 1).messages[2]?.content)).toContain(
+      'the section names $0.015',
+    )
+  })
+
   it('reads the card after the model explains itself, fenced or not, in one turn (#552)', async () => {
     // Live Sonnet 5.5 reply shapes: a sentence, then the card.
     const prose =

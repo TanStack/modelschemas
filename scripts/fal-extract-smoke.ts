@@ -7,7 +7,8 @@
  *   CLOUDFLARE_ACCOUNT_ID=… bunx tsx scripts/fal-extract-smoke.ts [fal model id]
  *
  * Node, not bun: wrangler's remote bindings cannot run under bun
- * (oven-sh/bun#39247). Needs `wrangler login`.
+ * (oven-sh/bun#39247). Needs `wrangler login`, and `FAL_KEY` (env or
+ * Doppler dev) for the endpoint's request properties.
  */
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -21,6 +22,7 @@ import {
   pricingSectionHash,
 } from '../src/server/ingest/extract-fal-pricing.ts'
 import { falLlmsTxtUrl } from '../src/server/providers/fal.ts'
+import { requestPropertiesOf } from './fal-models.ts'
 
 const rawId = process.argv[2] ?? 'heygen/heygen-voice'
 
@@ -43,9 +45,11 @@ try {
   const section = pricingSection(await (await fetch(sourceUrl)).text())
   console.log(section)
   const started = performance.now()
+  const requestProperties = await requestPropertiesOf(rawId)
+  console.log(`request properties: ${[...requestProperties].sort().join(', ')}`)
   const result = await extractRateCard({
     pricingText: section,
-    requestProperties: new Set<string>(),
+    requestProperties,
     sourceUrl,
     sourceHash: await pricingSectionHash(section),
     now: Math.floor(Date.now() / 1000),

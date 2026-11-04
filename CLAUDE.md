@@ -159,8 +159,9 @@ ones).
   become a card (one repair turn, same model); a failed one rewinds the
   cursor so the next shard retries it once. The prompt states today's
   date: a promo that has ended is priced at the regular rate the section
-  states, and a card that arrives already expired is rejected into the
-  repair turn (#552). The model call is TanStack AI
+  states (none stated: `unverified`, with the promo end, which the check
+  verifies is past), and a card that arrives already expired is rejected
+  into the repair turn (#552). The model call is TanStack AI
   `chat()` (`@tanstack/ai-anthropic` over `@tanstack/ai-cloudflare`'s `cloudflareBindingFetch`) on the `AI` binding through AI Gateway (`gatewayChat`, Unified
   Billing, gateway id `AI_GATEWAY_ID`, catalog id `anthropic/claude-sonnet-5.5`
   on the wire — `GATEWAY_MODEL_IDS`); `scripts/compare-fal-extract-models.ts`
