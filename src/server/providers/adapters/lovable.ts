@@ -44,7 +44,9 @@ const SURFACE_ROUTES: Record<string, string> = {
   videos: 'videos',
 }
 
-const SURFACE_ACTIVITIES: Record<string, Activity> = {
+/** Every surface the listing names; `systemone` (decisions) is no generation activity. */
+const SURFACE_ACTIVITIES: Record<string, Activity | null> = {
+  systemone: null,
   'chat-completions': 'chat',
   responses: 'chat',
   messages: 'chat',
@@ -93,6 +95,10 @@ export function parseLovableModels(payload: unknown): Array<ModelInfo> {
       throw new Error('lovable: models row has no id')
     }
     const surfaces = stringList(row.supported_surfaces) ?? []
+    const unknown = surfaces.find((s) => !(s in SURFACE_ACTIVITIES))
+    if (unknown !== undefined) {
+      throw new Error(`lovable: ${row.id} lists unknown surface ${unknown}`)
+    }
     const activity =
       surfaces.map((s) => SURFACE_ACTIVITIES[s]).find((a) => a) ?? null
     const route = surfaces.map((s) => SURFACE_ROUTES[s]).find((r) => r) ?? null
@@ -110,7 +116,7 @@ export function parseLovableModels(payload: unknown): Array<ModelInfo> {
       maxOutput: positive(row.max_tokens),
       modalities: modalities(row.modalities),
       knowledgeCutoff: knowledge,
-      releasedAt: positive(row.released) ?? positive(row.created),
+      releasedAt: positive(row.released),
       deprecated: row.deprecated === true,
     })
   }

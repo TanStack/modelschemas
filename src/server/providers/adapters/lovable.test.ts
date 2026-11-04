@@ -51,9 +51,20 @@ describe('lovable listing', () => {
     ])
   })
 
-  it('refuses an unreadable payload', () => {
+  it('refuses an unreadable payload or an unknown surface', () => {
     expect(() => parseLovableModels({})).toThrow('no data array')
     expect(() => parseLovableModels({ data: [{ name: 'x' }] })).toThrow('no id')
+    expect(() =>
+      parseLovableModels({ data: [row({ supported_surfaces: ['realtime'] })] }),
+    ).toThrow('unknown surface realtime')
+    const [decision] = parseLovableModels({
+      data: [
+        row({ id: 'typesafe/jev-1.13', supported_surfaces: ['systemone'] }),
+      ],
+    })
+    expect(decision).toMatchObject({ activity: null, schemaEndpointId: null })
+    const [unreleased] = parseLovableModels({ data: [row({ released: null })] })
+    expect(unreleased?.releasedAt).toBeNull()
   })
 
   it('states the maker from the id', () => {

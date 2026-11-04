@@ -29,9 +29,8 @@ import type {
 
 export const NEON_CATALOG_URL = 'https://neon.com/models.json'
 const NEON_DOCS_URL = 'https://neon.com/docs/ai-gateway/models'
-/** The docs' example branch host; every branch has its own. */
-const NEON_EXAMPLE_HOST =
-  'br-winter-pond-aptw82ef-api.ai.c-2.us-east-2.aws.neon.tech'
+/** A placeholder in the shape of a branch host; every branch has its own. */
+const NEON_HOST_PLACEHOLDER = 'br-example-api.ai.c-2.us-east-2.aws.neon.tech'
 
 export const NEON_CONNECT: ProviderConnect = {
   servers: [
@@ -40,7 +39,7 @@ export const NEON_CONNECT: ProviderConnect = {
       description: 'Your branch gateway host (NEON_AI_GATEWAY_BASE_URL).',
       variables: {
         host: {
-          default: NEON_EXAMPLE_HOST,
+          default: NEON_HOST_PLACEHOLDER,
           description:
             'The bare AI Gateway host of your Neon branch, from `neon env pull`.',
         },
@@ -142,12 +141,13 @@ export function parseNeonModels(
     if (row.released !== true || row.type === 'decision') continue
     const activity = row.type === 'embedding' ? 'embeddings' : 'chat'
     const limit = isRecord(row.limit) ? row.limit : {}
-    const modalities = isRecord(row.modalities)
-      ? {
-          input: stringList(row.modalities.input) ?? [],
-          output: stringList(row.modalities.output) ?? [],
-        }
+    const input = isRecord(row.modalities)
+      ? stringList(row.modalities.input)
       : null
+    const output = isRecord(row.modalities)
+      ? stringList(row.modalities.output)
+      : null
+    const modalities = input && output ? { input, output } : null
     const capabilities: Array<string> = []
     const unsupported: Array<string> = []
     const flags: Array<[string, string]> = [
