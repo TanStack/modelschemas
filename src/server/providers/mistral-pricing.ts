@@ -21,6 +21,12 @@
  * output" stat when Mistral publishes one, and a pricing widget for models
  * the token table does not list. `k` and `M` on that stat are 1024, the same
  * scale the listing uses (262144 shown as 256k).
+ *
+ * A model Mistral drops from the pricing table keeps its page. The HTML
+ * widget is often gone; the page's markdown twin still states `Pricing:`.
+ * That line is the card (#543). The models overview pairs the API name
+ * with the page slug, including deprecated rows the index-slug rules miss
+ * (`mistral-medium-3-5` → `mistral-medium-3-5-26-04`).
  */
 import {
   cardPrice,
@@ -29,6 +35,7 @@ import {
 } from '@modelschemas/rate-card'
 import type { Expr, RateCard } from '@modelschemas/rate-card'
 
+import { MISTRAL_DEPRECATIONS_URL } from './deprecations.ts'
 import { tagDocsFacts } from './fact-sources.ts'
 import { assertParsed, cachedDocs, mapConcurrent } from './model-facts.ts'
 import { parseMistralPageTools } from './server-tools.ts'
@@ -40,6 +47,11 @@ export const MISTRAL_CHANGELOG_URL =
   'https://docs.mistral.ai/resources/changelogs'
 const MISTRAL_MODEL_PAGE = (slug: string) =>
   `https://docs.mistral.ai/models/${slug}`
+
+/** A docs twin that Mistral does not publish. Any other status still throws. */
+function isMissingDocsPage(error: unknown): boolean {
+  return error instanceof Error && /→ 404\b/.test(error.message)
+}
 
 export interface MistralTokenRates {
   kind: 'tokens'
@@ -872,6 +884,100 @@ export function parseMistralPagePrice(html: string): MistralListedPrice | null {
   return priced[0] ?? null
 }
 
+/**
+ * The model page markdown's `Pricing:` line. One line, meters separated by
+ * `;`. `Free` or an all-zero line is no card. A line that is present and
+ * unreadable throws. No line is null: the HTML page was the price source.
+ */
+export function parseMistralMarkdownPrice(
+  markdown: string,
+): MistralListedPrice | null {
+  const lines = [...markdown.matchAll(/^- Pricing: (.+)$/gm)].map(
+    (match) => match[1]?.trim() ?? '',
+  )
+  if (lines.length === 0) return null
+  if (lines.length > 1) {
+    throw new Error('mistral model page pricing: multiple Pricing lines')
+  }
+  const parts = (lines[0] ?? '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+  if (parts.length === 0) {
+    throw new Error('mistral model page pricing: empty Pricing line')
+  }
+  let free = false
+  const meters: Array<{
+    side: 'input' | 'output'
+    label?: string
+    denominator: string
+    amount: number
+  }> = []
+  for (const part of parts) {
+    if (/^free$/i.test(part)) {
+      free = true
+      continue
+    }
+    const match =
+      /^(input|output|cached input)\s+\$([\d,]+(?:\.\d+)?)\s+(\/\S+(?:\s+\S+)*)$/i.exec(
+        part,
+      )
+    if (!match?.[1] || !match[2] || !match[3]) {
+      throw new Error(
+        `mistral model page pricing: unreadable markdown meter ${JSON.stringify(part)}`,
+      )
+    }
+    const label = match[1].toLowerCase()
+    const amount = Number(match[2].replace(/,/g, ''))
+    if (!Number.isFinite(amount)) {
+      throw new Error(
+        `mistral model page pricing: unreadable markdown meter ${JSON.stringify(part)}`,
+      )
+    }
+    meters.push({
+      side: label === 'output' ? 'output' : 'input',
+      ...(label === 'cached input' ? { label: 'Cached input' } : {}),
+      denominator: match[3],
+      amount,
+    })
+  }
+  if (free && meters.some((meter) => meter.amount > 0)) {
+    throw new Error(
+      'mistral model page pricing: free markdown line has a positive price',
+    )
+  }
+  if (free) return null
+  return listedFromMeters(meters)
+}
+
+/**
+ * API name → docs slug from the models overview, current and deprecated
+ * tables. A name two rows send to different slugs is omitted. An overview
+ * that pairs nothing throws: the tables moved.
+ */
+export function parseMistralApiSlugs(markdown: string): Map<string, string> {
+  const out = new Map<string, string>()
+  const ambiguous = new Set<string>()
+  for (const match of markdown.matchAll(
+    /\|\s*\[[^\]]*\]\((\/models\/([a-z0-9-]+))\)\s*\|\s*`([^`]+)`\s*\|/g,
+  )) {
+    const slug = match[2]
+    const id = match[3]
+    if (!slug || !id) continue
+    const prior = out.get(id)
+    if (prior && prior !== slug) {
+      ambiguous.add(id)
+      continue
+    }
+    out.set(id, slug)
+  }
+  for (const id of ambiguous) out.delete(id)
+  if (out.size === 0) {
+    throw new Error('mistral models overview: parsed 0 API slugs')
+  }
+  return out
+}
+
 export interface MistralModelPage {
   slug: string
   ids: Array<string>
@@ -880,6 +986,9 @@ export interface MistralModelPage {
   modalities?: MistralModalities | null
   maxOutput?: number | null
   pagePrice?: MistralListedPrice | null
+  /** Set when `pagePrice` was read from the markdown twin, not the HTML widget. */
+  priceUrl?: string
+  priceHash?: string
   features?: Array<string> | null
   extractedAt?: string
 }
@@ -933,10 +1042,11 @@ interface MistralStatedModalities {
  * API id → modalities its model page states. An id two pages state
  * differently gets none, like a price.
  *
- * Pages the pricing table does not link are fetched only when a listed id
- * matches one index slug: the slug itself, a trailing `-MMDD` unfolded to
- * `-MM-DD`, or the id with a `labs-` prefix removed. Zero or several
- * matches fetch nothing.
+ * Pages the pricing table does not link are fetched when a listed id is
+ * an API name on the models overview, else when it matches one index
+ * slug: the slug itself, a trailing `-MMDD` unfolded to `-MM-DD`, or the
+ * id with a `labs-` prefix removed. Zero or several index matches fetch
+ * nothing.
  */
 export function indexMistralModalities(
   pages: Array<MistralModelPage>,
@@ -1052,6 +1162,12 @@ interface PageSourced<T> {
 function indexPageField<T>(
   pages: Array<MistralModelPage>,
   read: (page: MistralModelPage) => T | null | undefined,
+  source: (page: MistralModelPage) => { url: string; hash: string } = (
+    page,
+  ) => ({
+    url: MISTRAL_MODEL_PAGE(page.slug),
+    hash: page.hash,
+  }),
 ): Map<string, PageSourced<T>> {
   const out = new Map<string, PageSourced<T>>()
   const conflicts = new Set<string>()
@@ -1060,8 +1176,7 @@ function indexPageField<T>(
     if (value == null) continue
     const stated = {
       value,
-      url: MISTRAL_MODEL_PAGE(page.slug),
-      hash: page.hash,
+      ...source(page),
     }
     const serialized = JSON.stringify(value)
     for (const id of page.ids) {
@@ -1147,6 +1262,26 @@ export async function mistralModelPricing(
       if (ids.length === 0) {
         throw new Error(`mistral model page ${slug}: parsed 0 API ids`)
       }
+      let pagePrice = parseMistralPagePrice(body)
+      let priceUrl: string | undefined
+      let priceHash: string | undefined
+      // The pricing table already priced this slug. Its page's markdown
+      // is a second statement of the same card, not a replacement.
+      if (!pagePrice && !bySlug.has(slug)) {
+        const mdUrl = `${url}.md`
+        let markdown: string | null = null
+        try {
+          markdown = await fetchText(mdUrl)
+        } catch (error) {
+          if (!isMissingDocsPage(error)) throw error
+        }
+        const stated = markdown ? parseMistralMarkdownPrice(markdown) : null
+        if (stated && markdown) {
+          pagePrice = stated
+          priceUrl = mdUrl
+          priceHash = await sha256Text(markdown)
+        }
+      }
       return {
         ids,
         hash: await sha256Text(body),
@@ -1157,7 +1292,8 @@ export async function mistralModelPricing(
         ),
         features,
         maxOutput: parseMistralPageMaxOutput(body),
-        pagePrice: parseMistralPagePrice(body),
+        pagePrice,
+        ...(priceUrl && priceHash ? { priceUrl, priceHash } : {}),
         extractedAt: new Date().toISOString(),
       }
     })
@@ -1168,23 +1304,40 @@ export async function mistralModelPricing(
   const missing = listedIds.filter((id) => !covered.has(id))
   let extraSlugs: Array<string> = []
   if (missing.length > 0) {
-    const slugs = await cached(kv, MISTRAL_MODELS_INDEX, async () => {
-      const html = await fetchText(MISTRAL_MODELS_INDEX)
-      const parsed = parseMistralModelIndex(html)
-      if (parsed.length === 0) {
-        throw new Error('mistral models index: parsed 0 slugs')
-      }
-      return parsed
+    const overview = await cached(
+      kv,
+      `${MISTRAL_DEPRECATIONS_URL}#api-slugs`,
+      async () => {
+        const markdown = await fetchText(MISTRAL_DEPRECATIONS_URL)
+        return Object.fromEntries(parseMistralApiSlugs(markdown))
+      },
+    )
+    const apiSlugs = new Map(Object.entries(overview))
+    const fromOverview = missing.flatMap((id) => {
+      const slug = apiSlugs.get(id)
+      return slug && !bySlug.has(slug) ? [slug] : []
     })
-    const index = new Set(slugs)
-    extraSlugs = [
-      ...new Set(
-        missing.flatMap((id) => {
-          const slug = mistralIndexSlugFor(id, index)
-          return slug && !bySlug.has(slug) ? [slug] : []
-        }),
-      ),
-    ]
+    const stillMissing = missing.filter((id) => {
+      const slug = apiSlugs.get(id)
+      return !(slug && !bySlug.has(slug))
+    })
+    let fromIndex: Array<string> = []
+    if (stillMissing.length > 0) {
+      const slugs = await cached(kv, MISTRAL_MODELS_INDEX, async () => {
+        const html = await fetchText(MISTRAL_MODELS_INDEX)
+        const parsed = parseMistralModelIndex(html)
+        if (parsed.length === 0) {
+          throw new Error('mistral models index: parsed 0 slugs')
+        }
+        return parsed
+      })
+      const index = new Set(slugs)
+      fromIndex = stillMissing.flatMap((id) => {
+        const slug = mistralIndexSlugFor(id, index)
+        return slug && !bySlug.has(slug) ? [slug] : []
+      })
+    }
+    extraSlugs = [...new Set([...fromOverview, ...fromIndex])]
   }
   const extraPages = await mapConcurrent(extraSlugs, 6, loadPage)
   const pages = [...tablePages, ...extraPages]
@@ -1205,7 +1358,14 @@ export async function mistralModelPricing(
   }
   const modalities = indexMistralModalities(pages)
   const maxOutput = indexPageField(pages, (page) => page.maxOutput)
-  const pageRates = indexPageField(pages, (page) => page.pagePrice)
+  const pageRates = indexPageField(
+    pages,
+    (page) => page.pagePrice,
+    (page) => ({
+      url: page.priceUrl ?? MISTRAL_MODEL_PAGE(page.slug),
+      hash: page.priceHash ?? page.hash,
+    }),
+  )
   const featured = indexPageField(pages, (page) => page.features)
   const webSearch = await cached(kv, MISTRAL_WEBSEARCH_URL, async () => {
     const markdown = await fetchText(MISTRAL_WEBSEARCH_URL)
