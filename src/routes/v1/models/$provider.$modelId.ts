@@ -4,13 +4,13 @@ import { env } from 'cloudflare:workers'
 import { getDb } from '#/db/index.ts'
 import { jsonError } from '#/server/admin.ts'
 import { getModelDetail, knownProviderIds } from '#/server/catalog.ts'
-import { cachedJson } from '#/server/http-cache.ts'
+import { cachedJson, catalogCache } from '#/server/http-cache.ts'
 
 export const Route = createFileRoute('/v1/models/$provider/$modelId')({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const db = getDb(env)
+        const db = getDb(env, { replica: true })
         const model = await getModelDetail(db, params.provider, params.modelId)
         if (!model) {
           const providers = await knownProviderIds(db)
@@ -23,8 +23,7 @@ export const Route = createFileRoute('/v1/models/$provider/$modelId')({
             `Unknown model '${params.modelId}' for provider '${params.provider}'. ${hint}`,
           )
         }
-        const now = Math.floor(Date.now() / 1000)
-        return cachedJson(request, model, { fetchedAt: now, staleAt: now + 60 })
+        return cachedJson(request, model, catalogCache())
       },
     },
   },

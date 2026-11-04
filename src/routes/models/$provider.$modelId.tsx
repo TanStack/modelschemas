@@ -92,7 +92,7 @@ const getModelDetail = createServerFn({ method: 'GET' })
     const { getProviderSchemaIndex } = await import('#/server/schemas-api.ts')
     const { getServiceStatus } = await import('#/server/status.ts')
 
-    const db = getDb(env)
+    const db = getDb(env, { replica: true })
     const model = await getModel(db, data.provider, data.modelId)
     if (!model) return null
     const { parseStoredRateCard, projectTokenPricing } =

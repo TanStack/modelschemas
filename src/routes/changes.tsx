@@ -62,6 +62,7 @@ const getChanges = createServerFn({ method: 'GET' })
     const { env } = await import('cloudflare:workers')
     const { getDb } = await import('#/db/index.ts')
     const { listChanges } = await import('#/server/changes-api.ts')
+    // Same primary as GET /v1/changes: the cursor has to see the latest write.
     const outcome = await listChanges(getDb(env), { ...data, limit: 50 })
     const renderedAt = Math.floor(Date.now() / 1000)
     if (!outcome.ok)

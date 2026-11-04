@@ -1,15 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { env } from 'cloudflare:test'
 
-import {
-  contentHash,
-  getByHash,
-  getJson,
-  putByHash,
-  putJson,
-  schemaKey,
-  stableStringify,
-} from './kv.ts'
+import { contentHash, getJson, putJson, stableStringify } from './kv.ts'
 
 describe('stableStringify', () => {
   it('is independent of object key order, including nested objects', () => {
@@ -45,13 +37,5 @@ describe('kv json helpers (real KV binding)', () => {
 
   it('returns null for a missing key', async () => {
     expect(await getJson(env.SCHEMA_CACHE, 'test:missing')).toBeNull()
-  })
-
-  it('stores and retrieves by content hash', async () => {
-    const value = { type: 'object', properties: { model: { type: 'string' } } }
-    const hash = await putByHash(env.SCHEMA_CACHE, value)
-    expect(hash).toBe(await contentHash(value))
-    expect(await getByHash(env.SCHEMA_CACHE, hash)).toEqual(value)
-    expect(await getJson(env.SCHEMA_CACHE, schemaKey(hash))).toEqual(value)
   })
 })

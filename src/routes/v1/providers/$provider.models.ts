@@ -4,7 +4,7 @@ import { env } from 'cloudflare:workers'
 import { getDb } from '#/db/index.ts'
 import { jsonError } from '#/server/admin.ts'
 import { knownProviderIds, listProviderModels } from '#/server/catalog.ts'
-import { cachedJson } from '#/server/http-cache.ts'
+import { cachedJson, catalogCache } from '#/server/http-cache.ts'
 
 export const Route = createFileRoute('/v1/providers/$provider/models')({
   server: {
@@ -18,7 +18,7 @@ export const Route = createFileRoute('/v1/providers/$provider/models')({
             'provenance must be 0 or 1.',
           )
         }
-        const db = getDb(env)
+        const db = getDb(env, { replica: true })
         const body = await listProviderModels(
           db,
           params.provider,
@@ -32,8 +32,7 @@ export const Route = createFileRoute('/v1/providers/$provider/models')({
             `Unknown provider '${params.provider}'. Valid providers: ${valid}.`,
           )
         }
-        const now = Math.floor(Date.now() / 1000)
-        return cachedJson(request, body, { fetchedAt: now, staleAt: now + 60 })
+        return cachedJson(request, body, catalogCache())
       },
     },
   },

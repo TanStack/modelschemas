@@ -9,106 +9,56 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SkillRouteImport } from './routes/skill'
-import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
-import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
-import { Route as OpenapiDotjsonRouteImport } from './routes/openapi[.]json'
-import { Route as McpRouteImport } from './routes/mcp'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt'
-import { Route as ExamplesRouteImport } from './routes/examples'
-import { Route as DocsRouteImport } from './routes/docs'
-import { Route as ChangesRouteImport } from './routes/changes'
-import { Route as AuthDotmdRouteImport } from './routes/auth[.]md'
-import { Route as AccountRouteImport } from './routes/account'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as V1IndexRouteImport } from './routes/v1/index'
-import { Route as SchemasIndexRouteImport } from './routes/schemas/index'
-import { Route as ModelsIndexRouteImport } from './routes/models/index'
-import { Route as V1ValidateRouteImport } from './routes/v1/validate'
-import { Route as V1StatusRouteImport } from './routes/v1/status'
-import { Route as V1EstimateRouteImport } from './routes/v1/estimate'
-import { Route as V1ChangesRouteImport } from './routes/v1/changes'
-import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known/oauth-protected-resource'
-import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known/oauth-authorization-server'
-import { Route as DotwellKnownApiCatalogRouteImport } from './routes/[.]well-known/api-catalog'
+import { Route as AccountRouteImport } from './routes/account'
+import { Route as AuthDotmdRouteImport } from './routes/auth[.]md'
+import { Route as ChangesRouteImport } from './routes/changes'
+import { Route as DocsRouteImport } from './routes/docs'
+import { Route as ExamplesRouteImport } from './routes/examples'
+import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as McpRouteImport } from './routes/mcp'
+import { Route as OpenapiDotjsonRouteImport } from './routes/openapi[.]json'
+import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as SkillRouteImport } from './routes/skill'
 import { Route as DotwellKnownAgentConfigurationRouteImport } from './routes/[.]well-known/agent-configuration'
-import { Route as V1SubscriptionsIndexRouteImport } from './routes/v1/subscriptions/index'
-import { Route as V1SchemasIndexRouteImport } from './routes/v1/schemas/index'
-import { Route as V1ProvidersIndexRouteImport } from './routes/v1/providers/index'
-import { Route as V1ModelsIndexRouteImport } from './routes/v1/models/index'
-import { Route as V1SubscriptionsIdRouteImport } from './routes/v1/subscriptions/$id'
-import { Route as V1OpenapiProviderRouteImport } from './routes/v1/openapi/$provider'
-import { Route as V1AgentsRegisterKeyRouteImport } from './routes/v1/agents/register-key'
-import { Route as V1AgentsMeRouteImport } from './routes/v1/agents/me'
-import { Route as V1AdminExportRouteImport } from './routes/v1/admin/export'
-import { Route as ModelsProviderModelIdRouteImport } from './routes/models/$provider.$modelId'
-import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as DotwellKnownMcpServerCardDotjsonRouteImport } from './routes/[.]well-known/mcp/server-card[.]json'
+import { Route as DotwellKnownApiCatalogRouteImport } from './routes/[.]well-known/api-catalog'
+import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known/oauth-authorization-server'
+import { Route as DotwellKnownOauthProtectedResourceRouteImport } from './routes/[.]well-known/oauth-protected-resource'
+import { Route as ModelsIndexRouteImport } from './routes/models/index'
+import { Route as SchemasIndexRouteImport } from './routes/schemas/index'
+import { Route as V1IndexRouteImport } from './routes/v1/index'
+import { Route as V1ChangesRouteImport } from './routes/v1/changes'
+import { Route as V1EstimateRouteImport } from './routes/v1/estimate'
+import { Route as V1StatusRouteImport } from './routes/v1/status'
+import { Route as V1ValidateRouteImport } from './routes/v1/validate'
 import { Route as DotwellKnownAgentSkillsIndexDotjsonRouteImport } from './routes/[.]well-known/agent-skills/index[.]json'
-import { Route as V1SchemasProviderIndexRouteImport } from './routes/v1/schemas/$provider/index'
-import { Route as V1ProvidersProviderModelsRouteImport } from './routes/v1/providers/$provider.models'
-import { Route as V1ModelsProviderModelIdRouteImport } from './routes/v1/models/$provider.$modelId'
-import { Route as V1AdminSyncProviderRouteImport } from './routes/v1/admin/sync.$provider'
-import { Route as V1AdminExtractFalRouteImport } from './routes/v1/admin/extract.fal'
-import { Route as SchemasProviderActivitySplatRouteImport } from './routes/schemas/$provider.$activity.$'
+import { Route as DotwellKnownMcpServerCardDotjsonRouteImport } from './routes/[.]well-known/mcp/server-card[.]json'
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ModelsProviderModelIdRouteImport } from './routes/models/$provider.$modelId'
+import { Route as V1AdminExportRouteImport } from './routes/v1/admin/export'
+import { Route as V1AgentsMeRouteImport } from './routes/v1/agents/me'
+import { Route as V1AgentsRegisterKeyRouteImport } from './routes/v1/agents/register-key'
+import { Route as V1ModelsIndexRouteImport } from './routes/v1/models/index'
+import { Route as V1OpenapiProviderRouteImport } from './routes/v1/openapi/$provider'
+import { Route as V1ProvidersIndexRouteImport } from './routes/v1/providers/index'
+import { Route as V1SchemasIndexRouteImport } from './routes/v1/schemas/index'
+import { Route as V1SubscriptionsIndexRouteImport } from './routes/v1/subscriptions/index'
+import { Route as V1SubscriptionsIdRouteImport } from './routes/v1/subscriptions/$id'
 import { Route as ModelsProviderModelIdPricingRouteImport } from './routes/models/$provider.$modelId_.pricing'
+import { Route as SchemasProviderActivitySplatRouteImport } from './routes/schemas/$provider.$activity.$'
+import { Route as V1AdminExtractFalRouteImport } from './routes/v1/admin/extract.fal'
+import { Route as V1AdminSyncProviderRouteImport } from './routes/v1/admin/sync.$provider'
+import { Route as V1ModelsProviderModelIdRouteImport } from './routes/v1/models/$provider.$modelId'
+import { Route as V1ProvidersProviderModelsRouteImport } from './routes/v1/providers/$provider.models'
+import { Route as V1SchemasProviderIndexRouteImport } from './routes/v1/schemas/$provider/index'
 import { Route as V1SchemasProviderActivityIndexRouteImport } from './routes/v1/schemas/$provider/$activity/index'
 import { Route as V1SchemasProviderActivitySplatRouteImport } from './routes/v1/schemas/$provider/$activity/$'
 
-const SkillRoute = SkillRouteImport.update({
-  id: '/skill',
-  path: '/skill',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
-  id: '/sitemap.xml',
-  path: '/sitemap.xml',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
-  id: '/robots.txt',
-  path: '/robots.txt',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OpenapiDotjsonRoute = OpenapiDotjsonRouteImport.update({
-  id: '/openapi.json',
-  path: '/openapi.json',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const McpRoute = McpRouteImport.update({
-  id: '/mcp',
-  path: '/mcp',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LlmsDottxtRoute = LlmsDottxtRouteImport.update({
-  id: '/llms.txt',
-  path: '/llms.txt',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ExamplesRoute = ExamplesRouteImport.update({
-  id: '/examples',
-  path: '/examples',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocsRoute = DocsRouteImport.update({
-  id: '/docs',
-  path: '/docs',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChangesRoute = ChangesRouteImport.update({
-  id: '/changes',
-  path: '/changes',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthDotmdRoute = AuthDotmdRouteImport.update({
-  id: '/auth.md',
-  path: '/auth.md',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountRoute = AccountRouteImport.update({
@@ -116,61 +66,59 @@ const AccountRoute = AccountRouteImport.update({
   path: '/account',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AuthDotmdRoute = AuthDotmdRouteImport.update({
+  id: '/auth.md',
+  path: '/auth.md',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1IndexRoute = V1IndexRouteImport.update({
-  id: '/v1/',
-  path: '/v1/',
+const ChangesRoute = ChangesRouteImport.update({
+  id: '/changes',
+  path: '/changes',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SchemasIndexRoute = SchemasIndexRouteImport.update({
-  id: '/schemas/',
-  path: '/schemas/',
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ModelsIndexRoute = ModelsIndexRouteImport.update({
-  id: '/models/',
-  path: '/models/',
+const ExamplesRoute = ExamplesRouteImport.update({
+  id: '/examples',
+  path: '/examples',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1ValidateRoute = V1ValidateRouteImport.update({
-  id: '/v1/validate',
-  path: '/v1/validate',
+const LlmsDottxtRoute = LlmsDottxtRouteImport.update({
+  id: '/llms.txt',
+  path: '/llms.txt',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1StatusRoute = V1StatusRouteImport.update({
-  id: '/v1/status',
-  path: '/v1/status',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1EstimateRoute = V1EstimateRouteImport.update({
-  id: '/v1/estimate',
-  path: '/v1/estimate',
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1ChangesRoute = V1ChangesRouteImport.update({
-  id: '/v1/changes',
-  path: '/v1/changes',
+const OpenapiDotjsonRoute = OpenapiDotjsonRouteImport.update({
+  id: '/openapi.json',
+  path: '/openapi.json',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DotwellKnownOauthProtectedResourceRoute =
-  DotwellKnownOauthProtectedResourceRouteImport.update({
-    id: '/.well-known/oauth-protected-resource',
-    path: '/.well-known/oauth-protected-resource',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const DotwellKnownOauthAuthorizationServerRoute =
-  DotwellKnownOauthAuthorizationServerRouteImport.update({
-    id: '/.well-known/oauth-authorization-server',
-    path: '/.well-known/oauth-authorization-server',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const DotwellKnownApiCatalogRoute = DotwellKnownApiCatalogRouteImport.update({
-  id: '/.well-known/api-catalog',
-  path: '/.well-known/api-catalog',
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: '/robots.txt',
+  path: '/robots.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SkillRoute = SkillRouteImport.update({
+  id: '/skill',
+  path: '/skill',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DotwellKnownAgentConfigurationRoute =
@@ -179,49 +127,73 @@ const DotwellKnownAgentConfigurationRoute =
     path: '/.well-known/agent-configuration',
     getParentRoute: () => rootRouteImport,
   } as any)
-const V1SubscriptionsIndexRoute = V1SubscriptionsIndexRouteImport.update({
-  id: '/v1/subscriptions/',
-  path: '/v1/subscriptions/',
+const DotwellKnownApiCatalogRoute = DotwellKnownApiCatalogRouteImport.update({
+  id: '/.well-known/api-catalog',
+  path: '/.well-known/api-catalog',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1SchemasIndexRoute = V1SchemasIndexRouteImport.update({
-  id: '/v1/schemas/',
-  path: '/v1/schemas/',
+const DotwellKnownOauthAuthorizationServerRoute =
+  DotwellKnownOauthAuthorizationServerRouteImport.update({
+    id: '/.well-known/oauth-authorization-server',
+    path: '/.well-known/oauth-authorization-server',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DotwellKnownOauthProtectedResourceRoute =
+  DotwellKnownOauthProtectedResourceRouteImport.update({
+    id: '/.well-known/oauth-protected-resource',
+    path: '/.well-known/oauth-protected-resource',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ModelsIndexRoute = ModelsIndexRouteImport.update({
+  id: '/models/',
+  path: '/models/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1ProvidersIndexRoute = V1ProvidersIndexRouteImport.update({
-  id: '/v1/providers/',
-  path: '/v1/providers/',
+const SchemasIndexRoute = SchemasIndexRouteImport.update({
+  id: '/schemas/',
+  path: '/schemas/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1ModelsIndexRoute = V1ModelsIndexRouteImport.update({
-  id: '/v1/models/',
-  path: '/v1/models/',
+const V1IndexRoute = V1IndexRouteImport.update({
+  id: '/v1/',
+  path: '/v1/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1SubscriptionsIdRoute = V1SubscriptionsIdRouteImport.update({
-  id: '/v1/subscriptions/$id',
-  path: '/v1/subscriptions/$id',
+const V1ChangesRoute = V1ChangesRouteImport.update({
+  id: '/v1/changes',
+  path: '/v1/changes',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1OpenapiProviderRoute = V1OpenapiProviderRouteImport.update({
-  id: '/v1/openapi/$provider',
-  path: '/v1/openapi/$provider',
+const V1EstimateRoute = V1EstimateRouteImport.update({
+  id: '/v1/estimate',
+  path: '/v1/estimate',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1AgentsRegisterKeyRoute = V1AgentsRegisterKeyRouteImport.update({
-  id: '/v1/agents/register-key',
-  path: '/v1/agents/register-key',
+const V1StatusRoute = V1StatusRouteImport.update({
+  id: '/v1/status',
+  path: '/v1/status',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1AgentsMeRoute = V1AgentsMeRouteImport.update({
-  id: '/v1/agents/me',
-  path: '/v1/agents/me',
+const V1ValidateRoute = V1ValidateRouteImport.update({
+  id: '/v1/validate',
+  path: '/v1/validate',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1AdminExportRoute = V1AdminExportRouteImport.update({
-  id: '/v1/admin/export',
-  path: '/v1/admin/export',
+const DotwellKnownAgentSkillsIndexDotjsonRoute =
+  DotwellKnownAgentSkillsIndexDotjsonRouteImport.update({
+    id: '/.well-known/agent-skills/index.json',
+    path: '/.well-known/agent-skills/index.json',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DotwellKnownMcpServerCardDotjsonRoute =
+  DotwellKnownMcpServerCardDotjsonRouteImport.update({
+    id: '/.well-known/mcp/server-card.json',
+    path: '/.well-known/mcp/server-card.json',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelsProviderModelIdRoute = ModelsProviderModelIdRouteImport.update({
@@ -229,26 +201,76 @@ const ModelsProviderModelIdRoute = ModelsProviderModelIdRouteImport.update({
   path: '/models/$provider/$modelId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
-  id: '/api/auth/$',
-  path: '/api/auth/$',
+const V1AdminExportRoute = V1AdminExportRouteImport.update({
+  id: '/v1/admin/export',
+  path: '/v1/admin/export',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DotwellKnownMcpServerCardDotjsonRoute =
-  DotwellKnownMcpServerCardDotjsonRouteImport.update({
-    id: '/.well-known/mcp/server-card.json',
-    path: '/.well-known/mcp/server-card.json',
+const V1AgentsMeRoute = V1AgentsMeRouteImport.update({
+  id: '/v1/agents/me',
+  path: '/v1/agents/me',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1AgentsRegisterKeyRoute = V1AgentsRegisterKeyRouteImport.update({
+  id: '/v1/agents/register-key',
+  path: '/v1/agents/register-key',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1ModelsIndexRoute = V1ModelsIndexRouteImport.update({
+  id: '/v1/models/',
+  path: '/v1/models/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1OpenapiProviderRoute = V1OpenapiProviderRouteImport.update({
+  id: '/v1/openapi/$provider',
+  path: '/v1/openapi/$provider',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1ProvidersIndexRoute = V1ProvidersIndexRouteImport.update({
+  id: '/v1/providers/',
+  path: '/v1/providers/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1SchemasIndexRoute = V1SchemasIndexRouteImport.update({
+  id: '/v1/schemas/',
+  path: '/v1/schemas/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1SubscriptionsIndexRoute = V1SubscriptionsIndexRouteImport.update({
+  id: '/v1/subscriptions/',
+  path: '/v1/subscriptions/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1SubscriptionsIdRoute = V1SubscriptionsIdRouteImport.update({
+  id: '/v1/subscriptions/$id',
+  path: '/v1/subscriptions/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModelsProviderModelIdPricingRoute =
+  ModelsProviderModelIdPricingRouteImport.update({
+    id: '/models/$provider/$modelId_/pricing',
+    path: '/models/$provider/$modelId/pricing',
     getParentRoute: () => rootRouteImport,
   } as any)
-const DotwellKnownAgentSkillsIndexDotjsonRoute =
-  DotwellKnownAgentSkillsIndexDotjsonRouteImport.update({
-    id: '/.well-known/agent-skills/index.json',
-    path: '/.well-known/agent-skills/index.json',
+const SchemasProviderActivitySplatRoute =
+  SchemasProviderActivitySplatRouteImport.update({
+    id: '/schemas/$provider/$activity/$',
+    path: '/schemas/$provider/$activity/$',
     getParentRoute: () => rootRouteImport,
   } as any)
-const V1SchemasProviderIndexRoute = V1SchemasProviderIndexRouteImport.update({
-  id: '/v1/schemas/$provider/',
-  path: '/v1/schemas/$provider/',
+const V1AdminExtractFalRoute = V1AdminExtractFalRouteImport.update({
+  id: '/v1/admin/extract/fal',
+  path: '/v1/admin/extract/fal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1AdminSyncProviderRoute = V1AdminSyncProviderRouteImport.update({
+  id: '/v1/admin/sync/$provider',
+  path: '/v1/admin/sync/$provider',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1ModelsProviderModelIdRoute = V1ModelsProviderModelIdRouteImport.update({
+  id: '/v1/models/$provider/$modelId',
+  path: '/v1/models/$provider/$modelId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const V1ProvidersProviderModelsRoute =
@@ -257,33 +279,11 @@ const V1ProvidersProviderModelsRoute =
     path: '/v1/providers/$provider/models',
     getParentRoute: () => rootRouteImport,
   } as any)
-const V1ModelsProviderModelIdRoute = V1ModelsProviderModelIdRouteImport.update({
-  id: '/v1/models/$provider/$modelId',
-  path: '/v1/models/$provider/$modelId',
+const V1SchemasProviderIndexRoute = V1SchemasProviderIndexRouteImport.update({
+  id: '/v1/schemas/$provider/',
+  path: '/v1/schemas/$provider/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const V1AdminSyncProviderRoute = V1AdminSyncProviderRouteImport.update({
-  id: '/v1/admin/sync/$provider',
-  path: '/v1/admin/sync/$provider',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const V1AdminExtractFalRoute = V1AdminExtractFalRouteImport.update({
-  id: '/v1/admin/extract/fal',
-  path: '/v1/admin/extract/fal',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SchemasProviderActivitySplatRoute =
-  SchemasProviderActivitySplatRouteImport.update({
-    id: '/schemas/$provider/$activity/$',
-    path: '/schemas/$provider/$activity/$',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const ModelsProviderModelIdPricingRoute =
-  ModelsProviderModelIdPricingRouteImport.update({
-    id: '/models/$provider/$modelId_/pricing',
-    path: '/models/$provider/$modelId/pricing',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const V1SchemasProviderActivityIndexRoute =
   V1SchemasProviderActivityIndexRouteImport.update({
     id: '/v1/schemas/$provider/$activity/',
@@ -640,81 +640,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/skill': {
-      id: '/skill'
-      path: '/skill'
-      fullPath: '/skill'
-      preLoaderRoute: typeof SkillRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sitemap.xml': {
-      id: '/sitemap.xml'
-      path: '/sitemap.xml'
-      fullPath: '/sitemap.xml'
-      preLoaderRoute: typeof SitemapDotxmlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/robots.txt': {
-      id: '/robots.txt'
-      path: '/robots.txt'
-      fullPath: '/robots.txt'
-      preLoaderRoute: typeof RobotsDottxtRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/openapi.json': {
-      id: '/openapi.json'
-      path: '/openapi.json'
-      fullPath: '/openapi.json'
-      preLoaderRoute: typeof OpenapiDotjsonRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mcp': {
-      id: '/mcp'
-      path: '/mcp'
-      fullPath: '/mcp'
-      preLoaderRoute: typeof McpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/llms.txt': {
-      id: '/llms.txt'
-      path: '/llms.txt'
-      fullPath: '/llms.txt'
-      preLoaderRoute: typeof LlmsDottxtRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/examples': {
-      id: '/examples'
-      path: '/examples'
-      fullPath: '/examples'
-      preLoaderRoute: typeof ExamplesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docs': {
-      id: '/docs'
-      path: '/docs'
-      fullPath: '/docs'
-      preLoaderRoute: typeof DocsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/changes': {
-      id: '/changes'
-      path: '/changes'
-      fullPath: '/changes'
-      preLoaderRoute: typeof ChangesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth.md': {
-      id: '/auth.md'
-      path: '/auth.md'
-      fullPath: '/auth.md'
-      preLoaderRoute: typeof AuthDotmdRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account': {
@@ -724,81 +654,81 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/auth.md': {
+      id: '/auth.md'
+      path: '/auth.md'
+      fullPath: '/auth.md'
+      preLoaderRoute: typeof AuthDotmdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/': {
-      id: '/v1/'
-      path: '/v1'
-      fullPath: '/v1/'
-      preLoaderRoute: typeof V1IndexRouteImport
+    '/changes': {
+      id: '/changes'
+      path: '/changes'
+      fullPath: '/changes'
+      preLoaderRoute: typeof ChangesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/schemas/': {
-      id: '/schemas/'
-      path: '/schemas'
-      fullPath: '/schemas/'
-      preLoaderRoute: typeof SchemasIndexRouteImport
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/models/': {
-      id: '/models/'
-      path: '/models'
-      fullPath: '/models/'
-      preLoaderRoute: typeof ModelsIndexRouteImport
+    '/examples': {
+      id: '/examples'
+      path: '/examples'
+      fullPath: '/examples'
+      preLoaderRoute: typeof ExamplesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/validate': {
-      id: '/v1/validate'
-      path: '/v1/validate'
-      fullPath: '/v1/validate'
-      preLoaderRoute: typeof V1ValidateRouteImport
+    '/llms.txt': {
+      id: '/llms.txt'
+      path: '/llms.txt'
+      fullPath: '/llms.txt'
+      preLoaderRoute: typeof LlmsDottxtRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/status': {
-      id: '/v1/status'
-      path: '/v1/status'
-      fullPath: '/v1/status'
-      preLoaderRoute: typeof V1StatusRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/estimate': {
-      id: '/v1/estimate'
-      path: '/v1/estimate'
-      fullPath: '/v1/estimate'
-      preLoaderRoute: typeof V1EstimateRouteImport
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/changes': {
-      id: '/v1/changes'
-      path: '/v1/changes'
-      fullPath: '/v1/changes'
-      preLoaderRoute: typeof V1ChangesRouteImport
+    '/openapi.json': {
+      id: '/openapi.json'
+      path: '/openapi.json'
+      fullPath: '/openapi.json'
+      preLoaderRoute: typeof OpenapiDotjsonRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/.well-known/oauth-protected-resource': {
-      id: '/.well-known/oauth-protected-resource'
-      path: '/.well-known/oauth-protected-resource'
-      fullPath: '/.well-known/oauth-protected-resource'
-      preLoaderRoute: typeof DotwellKnownOauthProtectedResourceRouteImport
+    '/robots.txt': {
+      id: '/robots.txt'
+      path: '/robots.txt'
+      fullPath: '/robots.txt'
+      preLoaderRoute: typeof RobotsDottxtRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/.well-known/oauth-authorization-server': {
-      id: '/.well-known/oauth-authorization-server'
-      path: '/.well-known/oauth-authorization-server'
-      fullPath: '/.well-known/oauth-authorization-server'
-      preLoaderRoute: typeof DotwellKnownOauthAuthorizationServerRouteImport
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/.well-known/api-catalog': {
-      id: '/.well-known/api-catalog'
-      path: '/.well-known/api-catalog'
-      fullPath: '/.well-known/api-catalog'
-      preLoaderRoute: typeof DotwellKnownApiCatalogRouteImport
+    '/skill': {
+      id: '/skill'
+      path: '/skill'
+      fullPath: '/skill'
+      preLoaderRoute: typeof SkillRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/.well-known/agent-configuration': {
@@ -808,88 +738,74 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DotwellKnownAgentConfigurationRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/subscriptions/': {
-      id: '/v1/subscriptions/'
-      path: '/v1/subscriptions'
-      fullPath: '/v1/subscriptions/'
-      preLoaderRoute: typeof V1SubscriptionsIndexRouteImport
+    '/.well-known/api-catalog': {
+      id: '/.well-known/api-catalog'
+      path: '/.well-known/api-catalog'
+      fullPath: '/.well-known/api-catalog'
+      preLoaderRoute: typeof DotwellKnownApiCatalogRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/schemas/': {
-      id: '/v1/schemas/'
-      path: '/v1/schemas'
-      fullPath: '/v1/schemas/'
-      preLoaderRoute: typeof V1SchemasIndexRouteImport
+    '/.well-known/oauth-authorization-server': {
+      id: '/.well-known/oauth-authorization-server'
+      path: '/.well-known/oauth-authorization-server'
+      fullPath: '/.well-known/oauth-authorization-server'
+      preLoaderRoute: typeof DotwellKnownOauthAuthorizationServerRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/providers/': {
-      id: '/v1/providers/'
-      path: '/v1/providers'
-      fullPath: '/v1/providers/'
-      preLoaderRoute: typeof V1ProvidersIndexRouteImport
+    '/.well-known/oauth-protected-resource': {
+      id: '/.well-known/oauth-protected-resource'
+      path: '/.well-known/oauth-protected-resource'
+      fullPath: '/.well-known/oauth-protected-resource'
+      preLoaderRoute: typeof DotwellKnownOauthProtectedResourceRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/models/': {
-      id: '/v1/models/'
-      path: '/v1/models'
-      fullPath: '/v1/models/'
-      preLoaderRoute: typeof V1ModelsIndexRouteImport
+    '/models/': {
+      id: '/models/'
+      path: '/models'
+      fullPath: '/models/'
+      preLoaderRoute: typeof ModelsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/subscriptions/$id': {
-      id: '/v1/subscriptions/$id'
-      path: '/v1/subscriptions/$id'
-      fullPath: '/v1/subscriptions/$id'
-      preLoaderRoute: typeof V1SubscriptionsIdRouteImport
+    '/schemas/': {
+      id: '/schemas/'
+      path: '/schemas'
+      fullPath: '/schemas/'
+      preLoaderRoute: typeof SchemasIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/openapi/$provider': {
-      id: '/v1/openapi/$provider'
-      path: '/v1/openapi/$provider'
-      fullPath: '/v1/openapi/$provider'
-      preLoaderRoute: typeof V1OpenapiProviderRouteImport
+    '/v1/': {
+      id: '/v1/'
+      path: '/v1'
+      fullPath: '/v1/'
+      preLoaderRoute: typeof V1IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/agents/register-key': {
-      id: '/v1/agents/register-key'
-      path: '/v1/agents/register-key'
-      fullPath: '/v1/agents/register-key'
-      preLoaderRoute: typeof V1AgentsRegisterKeyRouteImport
+    '/v1/changes': {
+      id: '/v1/changes'
+      path: '/v1/changes'
+      fullPath: '/v1/changes'
+      preLoaderRoute: typeof V1ChangesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/agents/me': {
-      id: '/v1/agents/me'
-      path: '/v1/agents/me'
-      fullPath: '/v1/agents/me'
-      preLoaderRoute: typeof V1AgentsMeRouteImport
+    '/v1/estimate': {
+      id: '/v1/estimate'
+      path: '/v1/estimate'
+      fullPath: '/v1/estimate'
+      preLoaderRoute: typeof V1EstimateRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/admin/export': {
-      id: '/v1/admin/export'
-      path: '/v1/admin/export'
-      fullPath: '/v1/admin/export'
-      preLoaderRoute: typeof V1AdminExportRouteImport
+    '/v1/status': {
+      id: '/v1/status'
+      path: '/v1/status'
+      fullPath: '/v1/status'
+      preLoaderRoute: typeof V1StatusRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/models/$provider/$modelId': {
-      id: '/models/$provider/$modelId'
-      path: '/models/$provider/$modelId'
-      fullPath: '/models/$provider/$modelId'
-      preLoaderRoute: typeof ModelsProviderModelIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/auth/$': {
-      id: '/api/auth/$'
-      path: '/api/auth/$'
-      fullPath: '/api/auth/$'
-      preLoaderRoute: typeof ApiAuthSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/.well-known/mcp/server-card.json': {
-      id: '/.well-known/mcp/server-card.json'
-      path: '/.well-known/mcp/server-card.json'
-      fullPath: '/.well-known/mcp/server-card.json'
-      preLoaderRoute: typeof DotwellKnownMcpServerCardDotjsonRouteImport
+    '/v1/validate': {
+      id: '/v1/validate'
+      path: '/v1/validate'
+      fullPath: '/v1/validate'
+      preLoaderRoute: typeof V1ValidateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/.well-known/agent-skills/index.json': {
@@ -899,39 +815,95 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DotwellKnownAgentSkillsIndexDotjsonRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/schemas/$provider/': {
-      id: '/v1/schemas/$provider/'
-      path: '/v1/schemas/$provider'
-      fullPath: '/v1/schemas/$provider/'
-      preLoaderRoute: typeof V1SchemasProviderIndexRouteImport
+    '/.well-known/mcp/server-card.json': {
+      id: '/.well-known/mcp/server-card.json'
+      path: '/.well-known/mcp/server-card.json'
+      fullPath: '/.well-known/mcp/server-card.json'
+      preLoaderRoute: typeof DotwellKnownMcpServerCardDotjsonRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/providers/$provider/models': {
-      id: '/v1/providers/$provider/models'
-      path: '/v1/providers/$provider/models'
-      fullPath: '/v1/providers/$provider/models'
-      preLoaderRoute: typeof V1ProvidersProviderModelsRouteImport
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/models/$provider/$modelId': {
-      id: '/v1/models/$provider/$modelId'
-      path: '/v1/models/$provider/$modelId'
-      fullPath: '/v1/models/$provider/$modelId'
-      preLoaderRoute: typeof V1ModelsProviderModelIdRouteImport
+    '/models/$provider/$modelId': {
+      id: '/models/$provider/$modelId'
+      path: '/models/$provider/$modelId'
+      fullPath: '/models/$provider/$modelId'
+      preLoaderRoute: typeof ModelsProviderModelIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/admin/sync/$provider': {
-      id: '/v1/admin/sync/$provider'
-      path: '/v1/admin/sync/$provider'
-      fullPath: '/v1/admin/sync/$provider'
-      preLoaderRoute: typeof V1AdminSyncProviderRouteImport
+    '/v1/admin/export': {
+      id: '/v1/admin/export'
+      path: '/v1/admin/export'
+      fullPath: '/v1/admin/export'
+      preLoaderRoute: typeof V1AdminExportRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/v1/admin/extract/fal': {
-      id: '/v1/admin/extract/fal'
-      path: '/v1/admin/extract/fal'
-      fullPath: '/v1/admin/extract/fal'
-      preLoaderRoute: typeof V1AdminExtractFalRouteImport
+    '/v1/agents/me': {
+      id: '/v1/agents/me'
+      path: '/v1/agents/me'
+      fullPath: '/v1/agents/me'
+      preLoaderRoute: typeof V1AgentsMeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/agents/register-key': {
+      id: '/v1/agents/register-key'
+      path: '/v1/agents/register-key'
+      fullPath: '/v1/agents/register-key'
+      preLoaderRoute: typeof V1AgentsRegisterKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/models/': {
+      id: '/v1/models/'
+      path: '/v1/models'
+      fullPath: '/v1/models/'
+      preLoaderRoute: typeof V1ModelsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/openapi/$provider': {
+      id: '/v1/openapi/$provider'
+      path: '/v1/openapi/$provider'
+      fullPath: '/v1/openapi/$provider'
+      preLoaderRoute: typeof V1OpenapiProviderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/providers/': {
+      id: '/v1/providers/'
+      path: '/v1/providers'
+      fullPath: '/v1/providers/'
+      preLoaderRoute: typeof V1ProvidersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/schemas/': {
+      id: '/v1/schemas/'
+      path: '/v1/schemas'
+      fullPath: '/v1/schemas/'
+      preLoaderRoute: typeof V1SchemasIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/subscriptions/': {
+      id: '/v1/subscriptions/'
+      path: '/v1/subscriptions'
+      fullPath: '/v1/subscriptions/'
+      preLoaderRoute: typeof V1SubscriptionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/subscriptions/$id': {
+      id: '/v1/subscriptions/$id'
+      path: '/v1/subscriptions/$id'
+      fullPath: '/v1/subscriptions/$id'
+      preLoaderRoute: typeof V1SubscriptionsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/models/$provider/$modelId_/pricing': {
+      id: '/models/$provider/$modelId_/pricing'
+      path: '/models/$provider/$modelId/pricing'
+      fullPath: '/models/$provider/$modelId/pricing'
+      preLoaderRoute: typeof ModelsProviderModelIdPricingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/schemas/$provider/$activity/$': {
@@ -941,11 +913,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SchemasProviderActivitySplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/models/$provider/$modelId_/pricing': {
-      id: '/models/$provider/$modelId_/pricing'
-      path: '/models/$provider/$modelId/pricing'
-      fullPath: '/models/$provider/$modelId/pricing'
-      preLoaderRoute: typeof ModelsProviderModelIdPricingRouteImport
+    '/v1/admin/extract/fal': {
+      id: '/v1/admin/extract/fal'
+      path: '/v1/admin/extract/fal'
+      fullPath: '/v1/admin/extract/fal'
+      preLoaderRoute: typeof V1AdminExtractFalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/admin/sync/$provider': {
+      id: '/v1/admin/sync/$provider'
+      path: '/v1/admin/sync/$provider'
+      fullPath: '/v1/admin/sync/$provider'
+      preLoaderRoute: typeof V1AdminSyncProviderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/models/$provider/$modelId': {
+      id: '/v1/models/$provider/$modelId'
+      path: '/v1/models/$provider/$modelId'
+      fullPath: '/v1/models/$provider/$modelId'
+      preLoaderRoute: typeof V1ModelsProviderModelIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/providers/$provider/models': {
+      id: '/v1/providers/$provider/models'
+      path: '/v1/providers/$provider/models'
+      fullPath: '/v1/providers/$provider/models'
+      preLoaderRoute: typeof V1ProvidersProviderModelsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/schemas/$provider/': {
+      id: '/v1/schemas/$provider/'
+      path: '/v1/schemas/$provider'
+      fullPath: '/v1/schemas/$provider/'
+      preLoaderRoute: typeof V1SchemasProviderIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/v1/schemas/$provider/$activity/': {

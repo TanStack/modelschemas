@@ -1,20 +1,19 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { env, waitUntil } from 'cloudflare:workers'
+import { env } from 'cloudflare:workers'
 
 import { getDb } from '#/db/index.ts'
 import { activities } from '#/db/schema.ts'
 import type { Activity } from '#/db/schema.ts'
 import { jsonError } from '#/server/admin.ts'
-import { swr } from '#/server/cache.ts'
 import { knownProviderIds } from '#/server/catalog.ts'
-import { cachedJson } from '#/server/http-cache.ts'
+import { cachedJson, catalogCache } from '#/server/http-cache.ts'
 import { getActivitySchemaMap, providerExists } from '#/server/schemas-api.ts'
 
 export const Route = createFileRoute('/v1/schemas/$provider/$activity/')({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const db = getDb(env)
+        const db = getDb(env, { replica: true })
         if (!(activities as ReadonlyArray<string>).includes(params.activity)) {
           return jsonError(
             404,
@@ -31,16 +30,8 @@ export const Route = createFileRoute('/v1/schemas/$provider/$activity/')({
           )
         }
         const activity = params.activity as Activity
-        const result = await swr(
-          { db, kv: env.SCHEMA_CACHE, waitUntil },
-          `schema-map:${params.provider}:${activity}`,
-          () => getActivitySchemaMap(db, params.provider, activity),
-          { staleTime: 300 },
-        )
-        return cachedJson(request, result.value, {
-          fetchedAt: result.fetchedAt,
-          staleAt: result.staleAt,
-        })
+        const value = await getActivitySchemaMap(db, params.provider, activity)
+        return cachedJson(request, value, catalogCache())
       },
     },
   },

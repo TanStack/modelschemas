@@ -3,10 +3,13 @@
 Live AI model schema service on Cloudflare Workers: per-endpoint
 request/response JSON Schemas and model metadata for monitored providers
 (OpenAI, Anthropic, Gemini, xAI Grok, ElevenLabs, OpenRouter, FAL, BytePlus),
-with
-react-query-style server-side caching (D1 source of truth, KV hot cache,
-stale-while-revalidate) and automatic refresh — model lists every 15 minutes,
-full OpenAPI spec syncs daily.
+with public GETs on a D1 read session and edge caching (`max-age` of
+15 minutes on catalog and current schema reads; a year on
+`?version=<hash>`; purged after an admin sync). Turn on D1 read replication
+(`read_replication.mode: auto`) only after #554 recreates the database
+with a US primary; until then the session still reads the primary.
+Automatic refresh — model lists every 15 minutes, full OpenAPI spec
+syncs daily. KV holds rate-limit counters and the docs cache the crons use.
 
 Surfaces:
 

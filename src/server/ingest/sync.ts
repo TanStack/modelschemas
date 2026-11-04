@@ -19,7 +19,7 @@ import {
 import type { Activity } from '#/db/schema.ts'
 import { seedForProvider } from '#/db/seed-providers.ts'
 import { errorMessage } from '#/server/errors.ts'
-import { contentHash, putJson, schemaKey } from '#/server/kv.ts'
+import { contentHash } from '#/server/kv.ts'
 import {
   isMissingSecretSkip,
   PROVENANCE_MARKER,
@@ -323,7 +323,7 @@ export async function syncProvider(
   deps: SyncDeps,
   provider: ProviderConfig,
 ): Promise<SyncOutcome> {
-  const { db, kv, secrets } = deps
+  const { db, secrets } = deps
   const now = deps.now?.() ?? Math.floor(Date.now() / 1000)
   const outcome: SyncOutcome = {
     providerId: provider.id,
@@ -509,9 +509,6 @@ export async function syncProvider(
         },
         createdAt: now,
       })
-      // Content-addressed, so a blob left by a failed batch is unreferenced,
-      // never wrong.
-      await putJson(kv, schemaKey(hash), schema)
       // One batch, so a run that dies here never leaves two current rows,
       // nor a current row with no change, which no later run would write:
       // the next run finds the hash current and skips it.
