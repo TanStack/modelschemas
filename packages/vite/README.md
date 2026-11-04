@@ -39,4 +39,4 @@ verifies files match the `.manifest.json` lockfile. Run
 addresses and provenance.
 
 Docs: [modelschemas.com/docs](https://modelschemas.com/docs) · Source:
-[github.com/modelschemas/modelschemas](https://github.com/modelschemas/modelschemas)
+[github.com/TanStack/modelschemas](https://github.com/TanStack/modelschemas)

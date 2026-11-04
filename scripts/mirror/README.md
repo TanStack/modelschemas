@@ -1,6 +1,6 @@
 # modelschemas catalog data
 
-A read-only mirror of the [modelschemas](https://github.com/modelschemas/modelschemas)
+A read-only mirror of the [modelschemas](https://github.com/TanStack/modelschemas)
 catalog, refreshed hourly from `GET /v1/admin/export`. D1 behind
 https://modelschemas.openstory.workers.dev stays the source of truth.
 
@@ -21,4 +21,4 @@ older than the mirror's (delete `feed.json` to re-seed).
 
 **Pull requests here are overwritten by the next run.** A wrong fact is an
 adapter fix, not a data edit: open an issue on
-[modelschemas/modelschemas](https://github.com/modelschemas/modelschemas/issues).
+[TanStack/modelschemas](https://github.com/TanStack/modelschemas/issues).

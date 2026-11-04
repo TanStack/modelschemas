@@ -7,7 +7,7 @@ import { useState } from 'react'
 
 import { modelChangeHref } from '#/lib/change-link.ts'
 
-export const GITHUB_URL = 'https://github.com/tombeckenham/modelschemas'
+export const GITHUB_URL = 'https://github.com/TanStack/modelschemas'
 
 export function GithubIcon({ className = '' }: { className?: string }) {
   return (

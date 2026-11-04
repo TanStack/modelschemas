@@ -18,10 +18,10 @@
   "homepage": "https://modelschemas.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/modelschemas/modelschemas.git",
+    "url": "git+https://github.com/TanStack/modelschemas.git",
     "directory": "packages/client"
   },
-  "bugs": "https://github.com/modelschemas/modelschemas/issues",
+  "bugs": "https://github.com/TanStack/modelschemas/issues",
   "keywords": [
     "ai",
     "json-schema",

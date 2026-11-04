@@ -49,9 +49,9 @@ jobs:
 
       # A PR that changes a published package (packages/*, including the
       # generated client) needs a changeset, or `bunx changeset --empty`.
-      # Dependabot can't write changesets; the Version Packages PR consumes them.
+      # Renovate can't write changesets; the Version Packages PR consumes them.
       - name: Changeset check
-        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.head_ref != 'changeset-release/main'
+        if: github.event_name == 'pull_request' && github.actor != 'renovate[bot]' && github.head_ref != 'changeset-release/main'
         run: bunx changeset status --since=origin/main
 
       # The committed client must match the spec (PLAN.md task 7.4).

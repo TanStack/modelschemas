@@ -32,4 +32,4 @@ export const EXAMPLES: Array<ExampleApp> = [
 ]
 
 export const EXAMPLES_SOURCE_URL =
-  'https://github.com/modelschemas/modelschemas/tree/main/examples'
+  'https://github.com/TanStack/modelschemas/tree/main/examples'

@@ -349,7 +349,10 @@ error. Re-pick the model with `bun scripts/compare-fal-extract-models.ts`.
 ### Continuous deploys (Workers Builds)
 
 Pushes to `main` deploy via Cloudflare Workers Builds (dashboard → Workers
-& Pages → `modelschemas` → Settings → Build → connect the GitHub repo).
+& Pages → `modelschemas` → Settings → Build → connect
+`TanStack/modelschemas`). The previous connection was
+`modelschemas/modelschemas` and does not follow the transfer.
+
 Settings:
 
 - **Build command:** `bun run build`
@@ -391,13 +394,16 @@ so the first version of each name was a laptop `npm publish` with 2FA,
 then stage-only trusted publishers. Repeat that only when adding a **new
 package name**.
 
-Trusted-publisher config on every package must match:
+Trusted-publisher config on every package must match. Trusted publishing
+is bound to the repo path, so the `modelschemas/modelschemas` publisher
+does not survive the move: re-run this for every `@modelschemas/*` package
+and for unscoped `modelschemas`.
 
 ```bash
 npm install -g npm@11.19.0  # trust/stage need >= 11.15; npm 12 wants Node 24.15+
 npm trust github <name> \
   --file publish.yml \
-  --repo modelschemas/modelschemas \
+  --repo TanStack/modelschemas \
   --env npm \
   --allow-stage-publish
 ```
