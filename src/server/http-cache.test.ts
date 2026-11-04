@@ -31,7 +31,7 @@ describe('cachedJson', () => {
       new Date(FETCHED * 1000).toUTCString(),
     )
     expect(response.headers.get('cache-control')).toBe(
-      `public, max-age=${String(CATALOG_CACHE_SECONDS)}, s-maxage=${String(CATALOG_CACHE_SECONDS)}, stale-while-revalidate=600`,
+      `public, max-age=${String(CATALOG_CACHE_SECONDS)}, stale-while-revalidate=600`,
     )
     expect(response.headers.get('x-fetched-at')).toBe(String(FETCHED))
     expect(response.headers.get('x-stale-at')).toBe(String(STALE))
@@ -82,7 +82,7 @@ describe('cachedJson', () => {
       },
     )
     expect(response.headers.get('cache-control')).toBe(
-      'public, max-age=5, s-maxage=5, stale-while-revalidate=30',
+      'public, max-age=5, stale-while-revalidate=30',
     )
   })
 
@@ -93,7 +93,7 @@ describe('cachedJson', () => {
       { etag: 'abc', ...versionedSchemaCache(FETCHED) },
     )
     expect(response.headers.get('cache-control')).toBe(
-      'public, max-age=31536000, s-maxage=31536000, immutable',
+      'public, max-age=31536000, immutable',
     )
     expect(response.headers.get('last-modified')).toBe(
       new Date(FETCHED * 1000).toUTCString(),

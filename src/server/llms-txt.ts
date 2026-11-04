@@ -95,14 +95,14 @@ rate-limit token.
 ## Caching
 
 Catalog and current schema reads (\`/v1/models\`, \`/v1/providers\`, \`/v1/schemas\`,
-\`/v1/openapi/{provider}\`) send \`Cache-Control: public, s-maxage=900\` (the
-15-minute model poll). A schema read with \`?version=<content hash>\` is
-immutable and cached for a year. Responses also carry ETag (content hash),
-Last-Modified, X-Fetched-At and X-Stale-At (unix epoch seconds). Send
-If-None-Match to get 304s. \`/v1/changes\` and \`/v1/status\` are not edge-cached.
-A request with Authorization bypasses the edge cache and counts toward the
-rate limit. An anonymous response served from the edge does not run the
-worker, so it does not count toward the 60/h IP limit.
+\`/v1/openapi/{provider}\`) send \`Cache-Control: public, max-age=900\` (the
+15-minute model poll) and are edge-cached. A schema read with
+\`?version=<content hash>\` is immutable and cached for a year. Responses also
+carry ETag (content hash), Last-Modified, X-Fetched-At and X-Stale-At (unix
+epoch seconds). Send If-None-Match to get 304s. \`/v1/changes\` and
+\`/v1/status\` are not edge-cached. A response served from the edge does not
+run the worker, so it does not count toward the rate limit, with or without
+Authorization. Only cache misses are counted.
 
 ## Auth (optional — unlocks higher rate limits + webhooks)
 

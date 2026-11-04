@@ -1,14 +1,15 @@
 /**
  * HTTP cache semantics for read endpoints: `ETag` (content hash),
- * `Last-Modified`, `Cache-Control` (`s-maxage` for Workers Cache, `max-age`
- * for browsers), `X-Fetched-At` / `X-Stale-At` (unix epoch seconds), and
- * `If-None-Match` → 304.
+ * `Last-Modified`, `Cache-Control`, `X-Fetched-At` / `X-Stale-At` (unix
+ * epoch seconds), and `If-None-Match` → 304.
  *
- * Workers Cache (`cache.enabled` in wrangler.jsonc) stores a GET before
- * the worker runs when the response is `public` with a freshness lifetime.
- * `s-maxage` is that lifetime. It matches the 15-minute models poll for
- * catalog and current schema reads. A `?version=<hash>` schema never
- * changes, so it is cached for a year.
+ * Workers Cache (the `CachedReads` entrypoint in `src/worker.ts`) stores a
+ * GET before the worker runs when the response is `public` with a
+ * `max-age`. That lifetime matches the 15-minute models poll for catalog
+ * and current schema reads; a `?version=<hash>` schema never changes, so
+ * it is cached for a year. No `s-maxage`: Cloudflare disables
+ * stale-while-revalidate and stale-if-error when it is present, and the
+ * shared and browser lifetimes are the same here anyway.
  */
 import { contentHash } from '#/server/kv.ts'
 
@@ -25,16 +26,11 @@ export interface CacheHeaderOptions {
   fetchedAt: number
   /** Unix epoch seconds the value goes stale. */
   staleAt: number
-  /** Browser Cache-Control max-age (seconds). Defaults to the poll cadence. */
+  /** Cache-Control max-age (seconds), edge and browser. Defaults to the poll cadence. */
   maxAge?: number
-  /**
-   * Shared-cache lifetime (seconds). Defaults to `maxAge`. Workers Cache
-   * honors this over `max-age`.
-   */
-  sMaxAge?: number
   /** Cache-Control stale-while-revalidate window (seconds). Omitted when immutable. */
   staleWhileRevalidate?: number
-  /** Content-addressed body. Shared caches may keep it for `sMaxAge`. */
+  /** Content-addressed body. Caches may keep it for `maxAge` without revalidating. */
   immutable?: boolean
   /** Defaults to application/json. */
   contentType?: string
@@ -43,38 +39,30 @@ export interface CacheHeaderOptions {
 /** Cache window for a catalog or current-schema read. */
 export function catalogCache(
   now = Math.floor(Date.now() / 1000),
-): Pick<CacheHeaderOptions, 'fetchedAt' | 'staleAt' | 'maxAge' | 'sMaxAge'> {
+): Pick<CacheHeaderOptions, 'fetchedAt' | 'staleAt' | 'maxAge'> {
   return {
     fetchedAt: now,
     staleAt: now + CATALOG_CACHE_SECONDS,
     maxAge: CATALOG_CACHE_SECONDS,
-    sMaxAge: CATALOG_CACHE_SECONDS,
   }
 }
 
 /** Cache window for a schema read pinned to a content hash. */
 export function versionedSchemaCache(
   createdAt: number,
-): Pick<
-  CacheHeaderOptions,
-  'fetchedAt' | 'staleAt' | 'maxAge' | 'sMaxAge' | 'immutable'
-> {
+): Pick<CacheHeaderOptions, 'fetchedAt' | 'staleAt' | 'maxAge' | 'immutable'> {
   return {
     fetchedAt: createdAt,
     staleAt: createdAt + VERSIONED_SCHEMA_CACHE_SECONDS,
     maxAge: VERSIONED_SCHEMA_CACHE_SECONDS,
-    sMaxAge: VERSIONED_SCHEMA_CACHE_SECONDS,
     immutable: true,
   }
 }
 
 function cacheControl(options: CacheHeaderOptions): string {
-  const maxAge = options.maxAge ?? CATALOG_CACHE_SECONDS
-  const sMaxAge = options.sMaxAge ?? maxAge
   const parts = [
     'public',
-    `max-age=${String(maxAge)}`,
-    `s-maxage=${String(sMaxAge)}`,
+    `max-age=${String(options.maxAge ?? CATALOG_CACHE_SECONDS)}`,
   ]
   if (options.immutable) {
     parts.push('immutable')

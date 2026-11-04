@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "modelschemas",
   "compatibility_date": "2025-09-02",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "enable_ctx_exports"],
   "main": "src/worker.ts",
   "vars": {
     // Agent JWT audiences are origin-bound.
@@ -15,13 +15,18 @@
   "observability": {
     "enabled": true,
   },
-  // Workers Cache sits in front of fetch and honors Cache-Control.
-  // Catalog and schema GETs set s-maxage. The worker sets no-store on
-  // every other response so heuristic freshness cannot store them.
-  // An Authorization request bypasses this cache (Cloudflare's rule),
-  // so authenticated calls still hit the worker and the rate limit.
+  // Workers Cache. Only the `CachedReads` entrypoint (catalog, schema and
+  // OpenAPI GETs; see src/worker.ts) is cached; the default entrypoint
+  // skips the cache lookup so HTML, auth, changes and status pay nothing.
+  // A request with Authorization is still cached because those responses
+  // say `public` (Cloudflare's rule). `enable_ctx_exports` is what lets
+  // the default entrypoint call CachedReads.
   "cache": {
-    "enabled": true,
+    "enabled": false,
+  },
+  "exports": {
+    "default": { "type": "worker", "cache": { "enabled": false } },
+    "CachedReads": { "type": "worker", "cache": { "enabled": true } },
   },
   "workers_dev": true,
   "routes": [{ "pattern": "modelschemas.com", "custom_domain": true }],

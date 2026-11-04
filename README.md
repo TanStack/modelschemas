@@ -3,9 +3,9 @@
 Live AI model schema service on Cloudflare Workers: per-endpoint
 request/response JSON Schemas and model metadata for monitored providers
 (OpenAI, Anthropic, Gemini, xAI Grok, ElevenLabs, OpenRouter, FAL, BytePlus),
-with public GETs on a D1 read session and edge caching (`s-maxage` of
+with public GETs on a D1 read session and edge caching (`max-age` of
 15 minutes on catalog and current schema reads; a year on
-`?version=<hash>`). Turn on D1 read replication
+`?version=<hash>`; purged after an admin sync). Turn on D1 read replication
 (`read_replication.mode: auto`) only after #554 recreates the database
 with a US primary; until then the session still reads the primary.
 Automatic refresh — model lists every 15 minutes, full OpenAPI spec

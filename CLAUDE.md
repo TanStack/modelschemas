@@ -10,8 +10,9 @@ providers (OpenAI, Anthropic, Gemini, xAI Grok, ElevenLabs, OpenRouter, FAL,
 BytePlus),
 with a D1 read session on public GETs (replicas after #554's US
 primary has `read_replication.mode: auto`; the session still hits the
-primary until then), Workers Cache (`s-maxage` matched to the 15-minute
-poll; versioned schemas cached for a year), and cron-driven auto-refresh.
+primary until then), Workers Cache on the `CachedReads` entrypoint
+(`max-age` matched to the 15-minute poll; versioned schemas cached for a
+year; purged after an admin write), and cron-driven auto-refresh.
 KV remains for rate-limit counters and docs caches. Design ported from
 TanStack AI PR #622 (`@tanstack/ai-schemas`), minus codegen — schemas are
 extracted/bundled at runtime and served over HTTP/MCP.
@@ -221,7 +222,7 @@ ones).
   that target. Cloudflare AI Gateway is held until it has its own listing.
   Migration `0012` is hand-written (in-place `ALTER TABLE`, no rebuild).
 - **API** (`src/routes/v1/`): catalog and schema reads (`getDb(env, { replica: true })`,
-  ETag/304 and `s-maxage` via `http-cache.ts`), `POST /v1/validate`
+  ETag/304 and `public, max-age` via `http-cache.ts`), `POST /v1/validate`
   (@cfworker/json-schema), `POST /v1/estimate` (`@modelschemas/rate-card`),
   cursor-paginated `/v1/changes`, subscriptions.
   Errors are always `{ error: { code, message } }` with remediation hints.
@@ -242,9 +243,11 @@ ones).
   JWT jtis are single-use — mint per request. The plugin keeps seen jtis
   in an in-process cache (no `secondaryStorage`), not in D1. Rate limiting
   (`src/server/rate-limit.ts`): KV fixed-window, 60/h anon-IP, 5k/h
-  per verified credential. Workers Cache serves anonymous catalog and
-  schema GETs without running the worker, so those hits are not counted.
-  A request with `Authorization` bypasses the cache and is counted.
+  per verified credential. Workers Cache (the `CachedReads` entrypoint in
+  `src/worker.ts`) serves catalog and schema GET hits without running the
+  worker, so those hits are not counted, with or without `Authorization`
+  (the responses are `public`, which is Cloudflare's rule for caching an
+  authenticated request). Only misses are counted.
 - **Webhooks** (`src/server/webhooks.ts`): checkpointed fan-out of `changes`
   to subscriptions, HMAC-SHA256-signed delivery, exponential backoff,
   auto-pause after 8 failures; drained by the 15-min cron. Destination URLs
