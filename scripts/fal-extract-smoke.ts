@@ -44,9 +44,9 @@ try {
   const sourceUrl = falLlmsTxtUrl(rawId)
   const section = pricingSection(await (await fetch(sourceUrl)).text())
   console.log(section)
-  const started = performance.now()
   const requestProperties = await requestPropertiesOf(rawId)
   console.log(`request properties: ${[...requestProperties].sort().join(', ')}`)
+  const started = performance.now()
   const result = await extractRateCard({
     pricingText: section,
     requestProperties,

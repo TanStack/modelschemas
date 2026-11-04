@@ -59,7 +59,8 @@ export async function requestPropertiesOf(rawId: string): Promise<Set<string>> {
     expand: 'openapi-3.0',
   })
   const [model] = await falModels(params)
-  const spec = model?.openapi
+  if (!model) throw new Error(`fal models: ${rawId} not listed`)
+  const spec = model.openapi
   const post = Object.values(spec?.paths ?? {}).find((op) => op.post)?.post
   let schema: unknown = (
     post?.requestBody as

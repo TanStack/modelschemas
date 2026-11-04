@@ -470,6 +470,15 @@ Limited-time promo (50% off) until **October 31, 2026**: speech costs **$0.015**
     expect(textOf(runInput(live, 1).messages[2]?.content)).toContain(
       'the section names $0.015',
     )
+    // No promo in the section: a past end is a lazy refusal, not a fact.
+    const lazy = gatewayReplies(
+      { unverified: true, expiresAt: '2020-01-01T00:00:00Z' },
+      body,
+    )
+    await extract(args, lazy)
+    expect(textOf(runInput(lazy, 1).messages[2]?.content)).toContain(
+      'the section names $0.08',
+    )
   })
 
   it('reads the card after the model explains itself, fenced or not, in one turn (#552)', async () => {

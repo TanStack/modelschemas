@@ -158,6 +158,10 @@ export function pricingSection(llmsTxt: string): string {
  * suffix-`$` spellings (`$**0.04**`, `**0.17** $`) are real prices, not
  * stubs (issue #70).
  */
+/** A section that names a promo or its end; only these may answer "ended". */
+const PROMO_WORDS =
+  /\b(?:promo(?:tion(?:al)?)?|limited[- ]time|until|through|ends?|expires?)\b/i
+
 export function isStubPricingSection(section: string): boolean {
   return usdAmounts(section).length === 0
 }
@@ -338,10 +342,12 @@ export function checkExtractedCard(
   const priced = !isStubPricingSection(args.pricingText)
   if ('unverified' in parsed.data || parsed.data.examples.length === 0) {
     // An ended promo with no regular rate stated is no price: the reply
-    // names the end and the clock agrees (#552).
+    // names the end, the section names a promo, and the clock agrees
+    // (#552). The section check keeps a lazy refusal from unpricing a row.
     const ended =
       'unverified' in parsed.data &&
       parsed.data.expiresAt !== undefined &&
+      PROMO_WORDS.test(args.pricingText) &&
       Date.parse(parsed.data.expiresAt) <= args.now * 1000
     return priced && !ended
       ? {
