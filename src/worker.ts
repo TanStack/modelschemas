@@ -175,9 +175,22 @@ export class CachedReads extends WorkerEntrypoint<WorkerEnv> {
     ) as unknown as Promise<WorkersResponse>
   }
 
-  /** A purge is scoped to the entrypoint that calls it, so it lives here. */
+  /**
+   * A purge is scoped to the entrypoint that calls it, so it lives here.
+   * Throws rather than no-ops: a missing `ctx.cache` means caching is off
+   * for this entrypoint (wrangler.jsonc `exports`), and a failed purge
+   * would leave an admin sync invisible for `max-age`.
+   */
   async purge(): Promise<void> {
-    await this.ctx.cache?.purge({ purgeEverything: true })
+    if (!this.ctx.cache) {
+      throw new Error('CachedReads: ctx.cache is absent; caching is off')
+    }
+    const result = await this.ctx.cache.purge({ purgeEverything: true })
+    if (!result.success) {
+      throw new Error(
+        `CachedReads: purge failed: ${JSON.stringify(result.errors)}`,
+      )
+    }
   }
 }
 
@@ -199,7 +212,13 @@ export default {
       pathname.startsWith('/v1/admin/') &&
       response.ok
     ) {
-      ctx.waitUntil(ctx.exports.CachedReads.purge())
+      ctx.waitUntil(
+        ctx.exports.CachedReads.purge().catch((error: unknown) => {
+          console.error(
+            JSON.stringify({ job: 'cache-purge', error: String(error) }),
+          )
+        }),
+      )
     }
     return response
   },
