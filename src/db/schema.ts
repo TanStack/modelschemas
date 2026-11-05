@@ -501,6 +501,19 @@ export const endpoints = sqliteTable(
     method: text('method').notNull(),
     path: text('path').notNull(),
     description: text('description'),
+    /**
+     * Request media type when it is not `application/json` (a file upload
+     * is `multipart/form-data`). Null means JSON, including rows synced
+     * before the column existed.
+     */
+    requestContentType: text('request_content_type'),
+    /**
+     * Success-response media types when they are not a single JSON body.
+     * A stream stays in the list beside JSON. Null means `application/json`.
+     */
+    responseContentTypes: text('response_content_types', {
+      mode: 'json',
+    }).$type<Array<string> | null>(),
   },
   (table) => [index('endpoints_providerId_idx').on(table.providerId)],
 )
@@ -512,7 +525,11 @@ export const schemaVersions = sqliteTable(
     endpointId: text('endpoint_id')
       .notNull()
       .references(() => endpoints.id, { onDelete: 'cascade' }),
-    kind: text('kind', { enum: ['input', 'output'] }).notNull(),
+    /**
+     * `stream` is the SSE event schema for an operation that also has an
+     * `output` JSON schema. It is not a `GET /v1/schemas` kind.
+     */
+    kind: text('kind', { enum: ['input', 'output', 'stream'] }).notNull(),
     contentHash: text('content_hash').notNull(),
     schema: text('schema').notNull(),
     specRevision: text('spec_revision'),

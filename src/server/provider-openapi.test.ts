@@ -4,7 +4,11 @@ import {
   applyModelEnum,
   endpointMatchesModel,
   headerParams,
+  operationsFor,
   pathParamsFromPath,
+  requestMedia,
+  responseMedia,
+  streamOperationPath,
 } from './provider-openapi.ts'
 import { falProvider } from './providers/fal.ts'
 import { anthropicProvider } from './providers/anthropic.ts'
@@ -69,6 +73,118 @@ describe('applyModelEnum', () => {
     })
     expect(applyModelEnum({ type: 'string' }, ['x'])).toEqual({
       type: 'string',
+    })
+  })
+})
+
+describe('generation media types', () => {
+  const schema = { type: 'object', properties: { id: { type: 'string' } } }
+
+  it('defaults a recorded-before-content-types schema to JSON', () => {
+    expect(requestMedia(schema, null)).toEqual({
+      content: { 'application/json': { schema } },
+    })
+    expect(responseMedia(schema, null)).toEqual({
+      content: { 'application/json': { schema } },
+    })
+    expect(requestMedia(undefined, 'multipart/form-data')).toBeUndefined()
+    expect(responseMedia(undefined, null)).toBeUndefined()
+  })
+
+  it('sends a file upload as multipart and a stream as event-stream', () => {
+    expect(requestMedia(schema, 'multipart/form-data')).toEqual({
+      content: { 'multipart/form-data': { schema } },
+    })
+    expect(responseMedia(schema, ['text/event-stream'])).toEqual({
+      content: { 'text/event-stream': { schema } },
+    })
+    expect(responseMedia(undefined, ['text/event-stream'])).toBeUndefined()
+  })
+
+  it('keeps JSON and uses the stream schema for the event stream', () => {
+    const chunk = { type: 'object', properties: { delta: { type: 'string' } } }
+    expect(
+      responseMedia(schema, ['application/json', 'text/event-stream'], chunk),
+    ).toEqual({
+      content: {
+        'application/json': { schema },
+        'text/event-stream': { schema: chunk },
+      },
+    })
+    expect(
+      responseMedia(schema, ['application/json', 'text/event-stream']),
+    ).toEqual({
+      content: { 'application/json': { schema } },
+    })
+    expect(responseMedia(schema, ['application/json', 'text/plain'])).toEqual({
+      content: {
+        'application/json': { schema },
+        'text/plain': { schema: { type: 'string' } },
+      },
+    })
+  })
+
+  it('splits a JSON and SSE success body into two posts on the real URL', () => {
+    const chunk = { type: 'object', properties: { delta: { type: 'string' } } }
+    const ops = operationsFor(
+      'openai',
+      {
+        id: 'chat',
+        path: '/chat/completions',
+        activity: 'chat',
+        description: 'Create a completion',
+        method: 'POST',
+        input: schema,
+        output: schema,
+        streamSchema: chunk,
+        requestContentType: null,
+        responseContentTypes: ['application/json', 'text/event-stream'],
+        specRevision: null,
+      },
+      {
+        servers: [{ url: 'https://api.openai.com/v1' }],
+        securitySchemes: {},
+        security: [],
+      },
+      [],
+      undefined,
+    )
+    expect(ops.map((op) => [op.method, op.path])).toEqual([
+      ['post', '/chat/completions'],
+      ['post', streamOperationPath('/chat/completions')],
+    ])
+    const json = ops[0]?.operation.responses as {
+      '200': { content: Record<string, { schema: unknown }> }
+    }
+    const stream = ops[1]?.operation.responses as {
+      '200': { content: Record<string, { schema: unknown }> }
+    }
+    expect(json['200'].content).toEqual({
+      'application/json': { schema },
+    })
+    expect(stream['200'].content).toEqual({
+      'text/event-stream': { schema: chunk },
+    })
+    expect(ops[1]?.operation.operationId).not.toBe(
+      ops[0]?.operation.operationId,
+    )
+  })
+
+  it('describes audio responses as binary and keeps a stream schema beside them', () => {
+    expect(
+      responseMedia(schema, [
+        'application/octet-stream',
+        'audio/mpeg',
+        'text/event-stream',
+      ]),
+    ).toEqual({
+      content: {
+        'application/octet-stream': {
+          schema: { type: 'string', format: 'binary' },
+        },
+        'audio/mpeg': { schema: { type: 'string', format: 'binary' } },
+        'text/event-stream': { schema },
+      },
     })
   })
 })
