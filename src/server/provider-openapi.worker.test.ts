@@ -6,8 +6,7 @@ import type { Db } from '#/db/index.ts'
 import { eq } from 'drizzle-orm'
 
 import { endpoints, models, providers, schemaVersions } from '#/db/schema.ts'
-import { assembleProviderOpenApi } from './provider-openapi.ts'
-import { unresolvedRefs } from './fixtures/unresolved-refs.ts'
+import { assembleProviderOpenApi, unresolvedRefs } from './provider-openapi.ts'
 
 const NOW = 1_781_150_000
 const INPUT = {
@@ -977,6 +976,17 @@ describe('assembleProviderOpenApi', () => {
   })
 
   it('merges an upstream #stream path key into its base operation', async () => {
+    // Mistral's own spec: the base requires stream: false, the twin true.
+    const transcriptionRequest = (stream: boolean) =>
+      JSON.stringify({
+        type: 'object',
+        required: ['file'],
+        properties: {
+          file: { $ref: '#/$defs/File' },
+          stream: { type: 'boolean', const: stream, default: stream },
+        },
+        $defs: { File: { type: 'string', format: 'binary' } },
+      })
     await db
       .insert(providers)
       .values({
@@ -1010,6 +1020,22 @@ describe('assembleProviderOpenApi', () => {
     await db
       .insert(schemaVersions)
       .values([
+        {
+          id: 'mistral/v1/audio/transcriptions:input',
+          endpointId: 'mistral/v1/audio/transcriptions',
+          kind: 'input',
+          contentHash: 'o'.repeat(64),
+          schema: transcriptionRequest(false),
+          createdAt: NOW,
+        },
+        {
+          id: 'mistral/v1/audio/transcriptions#stream:input',
+          endpointId: 'mistral/v1/audio/transcriptions#stream',
+          kind: 'input',
+          contentHash: 'p'.repeat(64),
+          schema: transcriptionRequest(true),
+          createdAt: NOW,
+        },
         {
           id: 'mistral/v1/audio/transcriptions:output',
           endpointId: 'mistral/v1/audio/transcriptions',
@@ -1048,6 +1074,130 @@ describe('assembleProviderOpenApi', () => {
       'application/json',
       'text/event-stream',
     ])
+    expect(unresolvedRefs(result.document)).toEqual([])
+    const request = (
+      paths['/v1/audio/transcriptions']!.post as {
+        requestBody: { content: Record<string, { schema: unknown }> }
+      }
+    ).requestBody.content['multipart/form-data']?.schema
+    const file = { $ref: '#/components/schemas/File' }
+    const variant = (stream: boolean) => ({
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file,
+        stream: { type: 'boolean', const: stream, default: stream },
+      },
+    })
+    expect(request).toEqual({ anyOf: [variant(false), variant(true)] })
+  })
+
+  it('refuses twins that list one media type with different schemas', async () => {
+    await db
+      .insert(providers)
+      .values({
+        id: 'perplexity',
+        displayName: 'Perplexity',
+        specSourceUrl: 'https://example.com/p.json',
+      })
+      .onConflictDoNothing()
+    const both = ['application/json']
+    await db
+      .insert(endpoints)
+      .values([
+        {
+          id: 'perplexity/v1/agent',
+          providerId: 'perplexity',
+          activity: 'chat',
+          method: 'POST',
+          path: '/v1/agent',
+          responseContentTypes: both,
+        },
+        {
+          id: 'perplexity/v1/agent#stream',
+          providerId: 'perplexity',
+          activity: 'chat',
+          method: 'POST',
+          path: '/v1/agent#stream',
+          responseContentTypes: both,
+        },
+      ])
+      .onConflictDoNothing()
+    await db
+      .insert(schemaVersions)
+      .values([
+        {
+          id: 'perplexity/v1/agent:output',
+          endpointId: 'perplexity/v1/agent',
+          kind: 'output',
+          contentHash: 'q'.repeat(64),
+          schema: JSON.stringify({ type: 'object' }),
+          createdAt: NOW,
+        },
+        {
+          id: 'perplexity/v1/agent#stream:output',
+          endpointId: 'perplexity/v1/agent#stream',
+          kind: 'output',
+          contentHash: 'r'.repeat(64),
+          schema: JSON.stringify({ type: 'string' }),
+          createdAt: NOW,
+        },
+      ])
+      .onConflictDoNothing()
+    const result = await assembleProviderOpenApi(db, 'perplexity')
+    expect(result).toMatchObject({
+      ok: false,
+      status: 500,
+      code: 'schema_conflict',
+    })
+    if (!result.ok) expect(result.message).toContain('POST /v1/agent')
+  })
+
+  it('refuses a document whose stored schema has a dangling $ref', async () => {
+    await db
+      .insert(providers)
+      .values({
+        id: 'together',
+        displayName: 'Together',
+        specSourceUrl: 'https://example.com/t.json',
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(endpoints)
+      .values({
+        id: 'together/v1/completions',
+        providerId: 'together',
+        activity: 'chat',
+        method: 'POST',
+        path: '/v1/completions',
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(schemaVersions)
+      .values({
+        id: 'together/v1/completions:input',
+        endpointId: 'together/v1/completions',
+        kind: 'input',
+        contentHash: 's'.repeat(64),
+        schema: JSON.stringify({
+          type: 'object',
+          properties: { event: { $ref: '#/$defs/Missing' } },
+          $defs: { Other: { type: 'string' } },
+        }),
+        createdAt: NOW,
+      })
+      .onConflictDoNothing()
+    const result = await assembleProviderOpenApi(db, 'together')
+    expect(result).toMatchObject({
+      ok: false,
+      status: 500,
+      code: 'unresolved_refs',
+    })
+    if (!result.ok) {
+      expect(result.message).toContain(
+        '#/$defs/Missing at #/paths/~1v1~1completions/post',
+      )
+    }
   })
 
   it('refuses OpenAPI assembly for AsyncAPI-flagged FAL models', async () => {

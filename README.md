@@ -207,7 +207,13 @@ One operation per endpoint. A response that can be JSON or a stream lists
 `200`, as OpenAI's own spec does. Each schema's `$defs` are hoisted into
 `components.schemas`, so every `$ref` resolves within the document;
 identical definitions share one name, and a name two endpoints define
-differently gets a content-hash suffix.
+differently gets a content-hash suffix. An upstream `#stream` path key
+(Mistral transcriptions) is merged into its base operation: the request
+body is `anyOf` both variants (`stream: false` / `stream: true`). A
+document that would still hold an unresolved `$ref` is refused with
+`500 unresolved_refs`, naming the ref and where it sits; twins that list
+one media type with different schemas are refused with
+`500 schema_conflict`.
 
 **Breaking:** the `{path}#stream` SSE twins are gone. hey-api 0.99.0 types
 a JSON-or-SSE response as JSON only and returns the stream as one string

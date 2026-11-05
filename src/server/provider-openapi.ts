@@ -639,27 +639,79 @@ function buildQueueDocument(
   return { paths, schemas }
 }
 
-/** Add `extra`'s 200 media types that `base` lacks; `base` wins otherwise. */
-function mergeSuccessContent(
+/**
+ * Union two media maps. A type only one side lists is kept. A type both
+ * list with different schemas becomes `anyOf` (`union`) or an error.
+ */
+function mergeContent(
+  base: unknown,
+  extra: unknown,
+  union: boolean,
+  where: string,
+): Record<string, unknown> | undefined {
+  if (!isObject(extra)) return isObject(base) ? base : undefined
+  const out: Record<string, unknown> = isObject(base) ? { ...base } : {}
+  for (const [type, media] of Object.entries(extra)) {
+    const have = out[type]
+    if (!isObject(have) || !isObject(media)) {
+      out[type] = media
+      continue
+    }
+    if (JSON.stringify(have.schema) === JSON.stringify(media.schema)) continue
+    if (!union) {
+      throw new Error(
+        `${where} lists ${type} on both the base path and its #stream twin with different schemas`,
+      )
+    }
+    out[type] = { ...have, schema: { anyOf: [have.schema, media.schema] } }
+  }
+  return out
+}
+
+/**
+ * One operation for an upstream `#stream` twin and its base path (Mistral
+ * transcriptions: the base requires `stream: false`, the twin
+ * `stream: true`). Both request bodies are accepted (`anyOf`), and the
+ * 200 lists both sides' media types.
+ */
+function mergeTwin(
   base: Record<string, unknown>,
-  extra: Record<string, unknown>,
+  twin: Record<string, unknown>,
+  where: string,
 ): Record<string, unknown> {
+  const body = (operation: Record<string, unknown>) =>
+    isObject(operation.requestBody) ? operation.requestBody : undefined
   const success = (operation: Record<string, unknown>) => {
     const responses = operation.responses
     const ok = isObject(responses) ? responses['200'] : undefined
-    return isObject(ok) ? ok : {}
+    return isObject(ok) ? ok : undefined
   }
+  const baseBody = body(base)
+  const twinBody = body(twin)
+  const requestContent = mergeContent(
+    baseBody?.content,
+    twinBody?.content,
+    true,
+    where,
+  )
   const baseOk = success(base)
-  const extraContent = success(extra).content
-  if (!isObject(extraContent)) return base
-  const baseContent = isObject(baseOk.content) ? baseOk.content : {}
+  const okContent = mergeContent(
+    baseOk?.content,
+    success(twin)?.content,
+    false,
+    where,
+  )
   return {
     ...base,
+    ...(requestContent
+      ? { requestBody: { ...baseBody, ...twinBody, content: requestContent } }
+      : {}),
     responses: {
       ...(isObject(base.responses) ? base.responses : {}),
       '200': {
+        description: 'Success',
         ...baseOk,
-        content: { ...extraContent, ...baseContent },
+        ...(okContent ? { content: okContent } : {}),
       },
     },
   }
@@ -841,12 +893,12 @@ function hoistRoot(
 }
 
 /**
- * Every schema slot in `paths` (request and response bodies) and every
- * given component, with `$defs` hoisted into the returned
- * `components.schemas`. Mutates `paths` in place.
+ * Every schema slot in `items` (path items: request and response bodies)
+ * and every given component, with `$defs` hoisted into the returned
+ * `components.schemas`. Mutates the path items in place.
  */
 export function hoistSchemaDefs(
-  paths: Record<string, Record<string, unknown>>,
+  items: Iterable<Record<string, unknown>>,
   initial: Record<string, unknown>,
 ): Record<string, unknown> {
   const components: Record<string, unknown> = { ...initial }
@@ -863,7 +915,7 @@ export function hoistSchemaDefs(
       }
     }
   }
-  for (const item of Object.values(paths)) {
+  for (const item of items) {
     for (const operation of Object.values(item)) {
       if (!isObject(operation)) continue
       hoistContent(operation.requestBody)
@@ -874,6 +926,41 @@ export function hoistSchemaDefs(
     }
   }
   return components
+}
+
+/** Resolve a local `$ref` as a JSON pointer against the document root. */
+function resolvePointer(document: unknown, ref: string): unknown {
+  if (!ref.startsWith('#/')) return undefined
+  let node: unknown = document
+  for (const raw of ref.slice(2).split('/')) {
+    if (!isObject(node) && !Array.isArray(node)) return undefined
+    node = (node as Record<string, unknown>)[decodePointerToken(raw)]
+  }
+  return node
+}
+
+/** Every `$ref` in `document` that does not resolve, with where it sits. */
+export function unresolvedRefs(
+  document: unknown,
+): Array<{ ref: string; at: string }> {
+  const misses: Array<{ ref: string; at: string }> = []
+  const walk = (node: unknown, at: string): void => {
+    if (Array.isArray(node)) {
+      node.forEach((value, i) => walk(value, `${at}/${String(i)}`))
+      return
+    }
+    if (!isObject(node)) return
+    for (const [key, value] of Object.entries(node)) {
+      const token = key.replace(/~/g, '~0').replace(/\//g, '~1')
+      if (key === '$ref' && typeof value === 'string') {
+        if (resolvePointer(document, value) === undefined) {
+          misses.push({ ref: value, at })
+        }
+      } else walk(value, `${at}/${token}`)
+    }
+  }
+  walk(document, '#')
+  return misses
 }
 
 export function operationsFor(
@@ -1065,6 +1152,7 @@ export async function assembleProviderOpenApi(
 
   let queueSchemas: Record<string, unknown> | undefined
   const paths: Record<string, Record<string, unknown>> = {}
+  const twinPaths: Record<string, Record<string, unknown>> = {}
   if (queue) {
     const built = buildQueueDocument(providerId, selected, connect, lean)
     if ('empty' in built) {
@@ -1086,13 +1174,11 @@ export async function assembleProviderOpenApi(
             activity,
           })
         ).models.map((m) => m.rawId)
-    // An upstream `#stream` path key (Mistral) is the same URL: its media
-    // types join the base operation's 200, after the base is built.
-    const ordered = [...selected].sort(
-      (a, b) => Number(a.path.includes('#')) - Number(b.path.includes('#')),
-    )
-    for (const endpoint of ordered) {
+    // An upstream `#stream` path key (Mistral) is the same URL. Twins are
+    // built aside and merged into the base once their schemas are hoisted.
+    for (const endpoint of selected) {
       const path = endpoint.path.split('#')[0] ?? endpoint.path
+      const target = path === endpoint.path ? paths : twinPaths
       for (const op of operationsFor(
         providerId,
         { ...endpoint, path },
@@ -1100,12 +1186,9 @@ export async function assembleProviderOpenApi(
         modelIds,
         pinnedModel,
       )) {
-        const item = paths[op.path] ?? {}
-        const existing = item[op.method]
-        item[op.method] = isObject(existing)
-          ? mergeSuccessContent(existing, op.operation)
-          : op.operation
-        paths[op.path] = item
+        const item = target[op.path] ?? {}
+        item[op.method] = op.operation
+        target[op.path] = item
       }
     }
   }
@@ -1118,12 +1201,26 @@ export async function assembleProviderOpenApi(
   }
   let schemas: Record<string, unknown>
   try {
-    schemas = hoistSchemaDefs(paths, queueSchemas ?? {})
+    schemas = hoistSchemaDefs(
+      [...Object.values(paths), ...Object.values(twinPaths)],
+      queueSchemas ?? {},
+    )
+    for (const [path, twinItem] of Object.entries(twinPaths)) {
+      const item = paths[path] ?? {}
+      for (const [method, twin] of Object.entries(twinItem)) {
+        const base = item[method]
+        if (!isObject(twin)) continue
+        item[method] = isObject(base)
+          ? mergeTwin(base, twin, `${method.toUpperCase()} ${path}`)
+          : twin
+      }
+      paths[path] = item
+    }
   } catch (error) {
     return {
       ok: false,
       status: 500,
-      code: 'schema_name_conflict',
+      code: 'schema_conflict',
       message: `Could not assemble '${providerId}': ${error instanceof Error ? error.message : String(error)}. Use GET /v1/schemas/${providerId} for each endpoint's own schema.`,
     }
   }
@@ -1143,6 +1240,22 @@ export async function assembleProviderOpenApi(
       : {}),
     ...(Object.keys(components).length > 0 ? { components } : {}),
     paths,
+  }
+
+  // A stored schema whose `$ref` points at a def it does not carry would
+  // publish a document no generator can read. Name it instead.
+  const dangling = unresolvedRefs(document)
+  if (dangling.length > 0) {
+    const sample = dangling
+      .slice(0, 3)
+      .map((miss) => `${miss.ref} at ${miss.at}`)
+      .join('; ')
+    return {
+      ok: false,
+      status: 500,
+      code: 'unresolved_refs',
+      message: `Could not assemble '${providerId}': ${String(dangling.length)} $ref(s) do not resolve in the stored schemas (${sample}). Re-sync with POST /v1/admin/sync/${providerId}; each endpoint's own schema is at GET /v1/schemas/${providerId}.`,
+    }
   }
 
   return {

@@ -9,8 +9,8 @@ import {
   requestMedia,
   hoistSchemaDefs,
   responseMedia,
+  unresolvedRefs,
 } from './provider-openapi.ts'
-import { unresolvedRefs } from './fixtures/unresolved-refs.ts'
 import { falProvider } from './providers/fal.ts'
 import { anthropicProvider } from './providers/anthropic.ts'
 import { getProvider } from './providers/index.ts'
@@ -277,7 +277,7 @@ describe('hoistSchemaDefs', () => {
       '/a': body(a),
       '/b': body(b),
     }
-    const schemas = hoistSchemaDefs(paths, {})
+    const schemas = hoistSchemaDefs(Object.values(paths), {})
     const document = { paths, components: { schemas } }
     expect(unresolvedRefs(document)).toEqual([])
     expect(JSON.stringify(document)).not.toContain('$defs')
@@ -312,7 +312,7 @@ describe('hoistSchemaDefs', () => {
       properties: { children: { type: 'array', items: { $ref: '#' } } },
     }
     const paths: Record<string, Record<string, unknown>> = { '/t': body(tree) }
-    const schemas = hoistSchemaDefs(paths, { named: tree })
+    const schemas = hoistSchemaDefs(Object.values(paths), { named: tree })
     expect(unresolvedRefs({ paths, components: { schemas } })).toEqual([])
     expect(schemas.named).toEqual({
       type: 'object',
