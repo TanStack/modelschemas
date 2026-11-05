@@ -1,6 +1,6 @@
 {
   "name": "modelschemas",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "CLI for the modelschemas live AI model schema service.",
   "type": "module",
   "main": "./src/index.ts",
