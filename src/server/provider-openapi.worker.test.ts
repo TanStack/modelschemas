@@ -3,6 +3,8 @@ import { env } from 'cloudflare:test'
 
 import { getDb } from '#/db/index.ts'
 import type { Db } from '#/db/index.ts'
+import { eq } from 'drizzle-orm'
+
 import { endpoints, models, providers, schemaVersions } from '#/db/schema.ts'
 import { assembleProviderOpenApi } from './provider-openapi.ts'
 
@@ -57,6 +59,13 @@ beforeAll(async () => {
         activity: 'image',
         method: 'POST',
         path: '/fal-ai/other',
+      },
+      {
+        id: 'fal/fal-ai/retired',
+        providerId: 'fal',
+        activity: 'image',
+        method: 'POST',
+        path: '/fal-ai/retired',
       },
     ])
     .onConflictDoNothing()
@@ -116,6 +125,26 @@ beforeAll(async () => {
         providerId: 'fal',
         rawId: 'fal-ai/flux/dev',
         activity: 'image',
+        providerMetadata: { category: 'text-to-image' },
+        firstSeenAt: NOW,
+        lastSeenAt: NOW,
+      },
+      {
+        id: 'fal-fal-ai-other',
+        providerId: 'fal',
+        rawId: 'fal-ai/other',
+        activity: 'image',
+        providerMetadata: { category: 'text-to-image' },
+        firstSeenAt: NOW,
+        lastSeenAt: NOW,
+      },
+      {
+        id: 'fal-retired',
+        providerId: 'fal',
+        rawId: 'fal-ai/retired',
+        activity: 'image',
+        providerMetadata: { category: 'text-to-image' },
+        deprecatedAt: NOW,
         firstSeenAt: NOW,
         lastSeenAt: NOW,
       },
@@ -187,14 +216,40 @@ describe('assembleProviderOpenApi', () => {
     ).toEqual(['claude-sonnet-4-5'])
   })
 
-  it('refuses a combined FAL spec and serves one model with sibling GET', async () => {
+  it('serves FAL with no selector as one untyped queue document', async () => {
     const bare = await assembleProviderOpenApi(db, 'fal')
-    expect(bare).toMatchObject({
-      ok: false,
-      status: 400,
-      code: 'spec_requires_selector',
-    })
+    expect(bare.ok).toBe(true)
+    if (!bare.ok) return
+    const barePaths = bare.document.paths as Record<
+      string,
+      {
+        post: {
+          parameters: Array<{ name: string; schema?: { enum?: Array<string> } }>
+          requestBody: {
+            content: { 'application/json': { schema: Record<string, unknown> } }
+          }
+        }
+      }
+    >
+    expect(Object.keys(barePaths).sort()).toEqual([
+      '/{endpoint_id}',
+      '/{endpoint_id}/requests/{request_id}',
+    ])
+    const bareEnum = barePaths['/{endpoint_id}']?.post.parameters.find(
+      (parameter) => parameter.name === 'endpoint_id',
+    )?.schema?.enum
+    expect(bareEnum).toContain('fal-ai/flux/dev')
+    expect(bareEnum).not.toContain('fal-ai/retired')
+    expect(
+      barePaths['/{endpoint_id}']?.post.requestBody.content['application/json']
+        .schema,
+    ).toMatchObject({ type: 'object' })
+    expect(
+      (bare.document.components as { schemas?: unknown }).schemas,
+    ).toBeUndefined()
+  })
 
+  it('serves one model with sibling GET', async () => {
     const pinned = await assembleProviderOpenApi(db, 'fal', {
       model: 'fal-ai/flux/dev',
     })
@@ -233,13 +288,401 @@ describe('assembleProviderOpenApi', () => {
     ).toBeDefined()
     expect(paths['/fal-ai/other']).toBeUndefined()
 
-    expect(
-      await assembleProviderOpenApi(db, 'fal', { activity: 'image' }),
-    ).toMatchObject({
+    const pinnedActivity = await assembleProviderOpenApi(db, 'fal', {
+      model: 'fal-ai/flux/dev',
+      activity: 'image',
+    })
+    expect(pinnedActivity.ok).toBe(true)
+    if (!pinnedActivity.ok) return
+    expect(pinnedActivity.document.paths).toHaveProperty('/fal-ai/flux/dev')
+    expect(pinnedActivity.document.paths).not.toHaveProperty('/{endpoint_id}')
+  })
+
+  it('serves one FAL queue document for an activity', async () => {
+    const empty = await assembleProviderOpenApi(db, 'fal', {
+      activity: 'chat',
+    })
+    expect(empty).toMatchObject({
       ok: false,
       status: 400,
       code: 'spec_requires_selector',
     })
+
+    const result = await assembleProviderOpenApi(db, 'fal', {
+      activity: 'image',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const paths = result.document.paths as Record<
+      string,
+      {
+        post?: {
+          parameters?: Array<{
+            name: string
+            schema?: { enum?: Array<string> }
+          }>
+          requestBody?: {
+            content: {
+              'application/json': {
+                schema: { anyOf?: Array<{ $ref: string }> }
+              }
+            }
+          }
+        }
+        get?: {
+          responses?: {
+            '200'?: {
+              content?: {
+                'application/json': { schema: { $ref?: string } }
+              }
+            }
+          }
+        }
+      }
+    >
+    expect(Object.keys(paths).sort()).toEqual([
+      '/{endpoint_id}',
+      '/{endpoint_id}/requests/{request_id}',
+    ])
+    const endpointParam = paths['/{endpoint_id}']?.post?.parameters?.find(
+      (parameter) => parameter.name === 'endpoint_id',
+    )
+    expect(endpointParam).toMatchObject({ 'x-modelschemas-encode': 'raw' })
+    expect(endpointParam?.schema?.enum).toEqual([
+      'fal-ai/flux/dev',
+      'fal-ai/other',
+    ])
+    const body = paths['/{endpoint_id}']?.post?.requestBody
+    expect(body?.content['application/json'].schema.anyOf).toEqual([
+      { $ref: '#/components/schemas/input_fal-ai_flux_dev' },
+      { $ref: '#/components/schemas/input_fal-ai_other' },
+    ])
+    // fal-ai/other has no output schema, so the result stays untyped and
+    // the response says why.
+    const queued = (
+      paths['/{endpoint_id}/requests/{request_id}'] as {
+        get?: { responses?: { '200'?: { description?: string } } }
+      }
+    ).get?.responses?.['200']
+    expect(queued?.description).toContain('1 of 2 models')
+    expect(queued).not.toHaveProperty('content')
+    const schemas = (
+      result.document.components as {
+        schemas: Record<
+          string,
+          { 'x-modelschemas-model'?: string; properties?: unknown }
+        >
+      }
+    ).schemas
+    const fluxInput = schemas['input_fal-ai_flux_dev']
+    const otherInput = schemas['input_fal-ai_other']
+    expect(fluxInput?.['x-modelschemas-model']).toBe('fal-ai/flux/dev')
+    expect(fluxInput?.properties).toEqual({ prompt: { type: 'string' } })
+    expect(otherInput?.['x-modelschemas-model']).toBe('fal-ai/other')
+    // fal-ai/other has no output schema, so the result body is omitted
+    // rather than described as Flux's output.
+    expect(
+      paths['/{endpoint_id}/requests/{request_id}']?.get?.responses?.['200']
+        ?.content,
+    ).toBeUndefined()
+    expect(schemas['output_fal-ai_flux_dev']).toBeUndefined()
+    expect(schemas['input_fal-ai_retired']).toBeUndefined()
+    const info = result.document.info as { description?: string }
+    expect(info.description).toContain('x-modelschemas-model')
+  })
+
+  it('leaves a model with no generation endpoint out of the enum', async () => {
+    await db
+      .insert(models)
+      .values({
+        id: 'fal-orphan',
+        providerId: 'fal',
+        rawId: 'fal-ai/orphan',
+        activity: 'image',
+        providerMetadata: { category: 'text-to-image' },
+        firstSeenAt: NOW,
+        lastSeenAt: NOW,
+      })
+      .onConflictDoNothing()
+    const result = await assembleProviderOpenApi(db, 'fal', {
+      activity: 'image',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const post = (
+      result.document.paths as Record<
+        string,
+        { post: { parameters: Array<{ schema?: { enum?: Array<string> } }> } }
+      >
+    )['/{endpoint_id}']?.post
+    expect(post?.parameters[0]?.schema?.enum).not.toContain('fal-ai/orphan')
+    await db.delete(models).where(eq(models.id, 'fal-orphan'))
+  })
+
+  it('pairs each result schema with the same endpoint id', async () => {
+    await db
+      .insert(endpoints)
+      .values([
+        {
+          id: 'fal/fal-ai/pair/a',
+          providerId: 'fal',
+          activity: 'chat',
+          method: 'POST',
+          path: '/fal-ai/pair/a',
+        },
+        {
+          id: 'fal/fal-ai/pair/b',
+          providerId: 'fal',
+          activity: 'chat',
+          method: 'POST',
+          path: '/fal-ai/pair/b',
+        },
+        {
+          id: 'fal/fal-ai/pair/no-input',
+          providerId: 'fal',
+          activity: 'chat',
+          method: 'POST',
+          path: '/fal-ai/pair/no-input',
+        },
+      ])
+      .onConflictDoNothing()
+    await db
+      .insert(models)
+      .values([
+        {
+          id: 'fal-pair-a',
+          providerId: 'fal',
+          rawId: 'fal-ai/pair/a',
+          activity: 'chat',
+          providerMetadata: { category: 'paired-image' },
+          firstSeenAt: NOW,
+          lastSeenAt: NOW,
+        },
+        {
+          id: 'fal-pair-b',
+          providerId: 'fal',
+          rawId: 'fal-ai/pair/b',
+          activity: 'chat',
+          providerMetadata: { category: 'paired-image' },
+          firstSeenAt: NOW,
+          lastSeenAt: NOW,
+        },
+        {
+          id: 'fal-pair-no-input',
+          providerId: 'fal',
+          rawId: 'fal-ai/pair/no-input',
+          activity: 'chat',
+          providerMetadata: { category: 'paired-image' },
+          firstSeenAt: NOW,
+          lastSeenAt: NOW,
+        },
+      ])
+      .onConflictDoNothing()
+    await db
+      .insert(schemaVersions)
+      .values([
+        {
+          id: 'fal/fal-ai/pair/a:input',
+          endpointId: 'fal/fal-ai/pair/a',
+          kind: 'input',
+          contentHash: `a1${'1'.repeat(62)}`,
+          schema: JSON.stringify({
+            type: 'object',
+            properties: { prompt: { const: 'a' } },
+          }),
+          createdAt: NOW,
+        },
+        {
+          id: 'fal/fal-ai/pair/a:output',
+          endpointId: 'fal/fal-ai/pair/a',
+          kind: 'output',
+          contentHash: `a2${'2'.repeat(62)}`,
+          schema: JSON.stringify({
+            type: 'object',
+            properties: { image: { const: 'a' } },
+          }),
+          createdAt: NOW,
+        },
+        {
+          id: 'fal/fal-ai/pair/b:input',
+          endpointId: 'fal/fal-ai/pair/b',
+          kind: 'input',
+          contentHash: `b1${'3'.repeat(62)}`,
+          schema: JSON.stringify({
+            type: 'object',
+            properties: { prompt: { const: 'b' } },
+          }),
+          createdAt: NOW,
+        },
+        {
+          id: 'fal/fal-ai/pair/b:output',
+          endpointId: 'fal/fal-ai/pair/b',
+          kind: 'output',
+          contentHash: `b2${'4'.repeat(62)}`,
+          schema: JSON.stringify({
+            type: 'object',
+            properties: { image: { const: 'b' } },
+          }),
+          createdAt: NOW,
+        },
+      ])
+      .onConflictDoNothing()
+
+    const result = await assembleProviderOpenApi(db, 'fal', {
+      activity: 'chat',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const post = (
+      result.document.paths as Record<
+        string,
+        {
+          post?: {
+            parameters?: Array<{ schema?: { enum?: Array<string> } }>
+            requestBody?: {
+              content: {
+                'application/json': {
+                  schema: { anyOf?: Array<{ $ref: string }> }
+                }
+              }
+            }
+          }
+          get?: {
+            responses?: {
+              '200'?: {
+                content?: {
+                  'application/json': {
+                    schema: { anyOf?: Array<{ $ref: string }> }
+                  }
+                }
+              }
+            }
+          }
+        }
+      >
+    )['/{endpoint_id}']?.post
+    const get = (
+      result.document.paths as Record<
+        string,
+        {
+          get?: {
+            parameters?: Array<{ schema?: { enum?: Array<string> } }>
+            responses?: {
+              '200'?: {
+                content?: {
+                  'application/json': {
+                    schema: { anyOf?: Array<{ $ref: string }> }
+                  }
+                }
+              }
+            }
+          }
+        }
+      >
+    )['/{endpoint_id}/requests/{request_id}']?.get
+    expect(post?.parameters?.[0]?.schema?.enum).toEqual([
+      'fal-ai/pair/a',
+      'fal-ai/pair/b',
+    ])
+    expect(get?.parameters?.[0]?.schema?.enum).toEqual([
+      'fal-ai/pair/a',
+      'fal-ai/pair/b',
+    ])
+    expect(post?.requestBody?.content['application/json'].schema.anyOf).toEqual(
+      [
+        { $ref: '#/components/schemas/input_fal-ai_pair_a' },
+        { $ref: '#/components/schemas/input_fal-ai_pair_b' },
+      ],
+    )
+    expect(
+      get?.responses?.['200']?.content?.['application/json'].schema.anyOf,
+    ).toEqual([
+      { $ref: '#/components/schemas/output_fal-ai_pair_a' },
+      { $ref: '#/components/schemas/output_fal-ai_pair_b' },
+    ])
+    const schemas = (
+      result.document.components as {
+        schemas: Record<string, { 'x-modelschemas-model'?: string }>
+      }
+    ).schemas
+    expect(schemas['input_fal-ai_pair_a']?.['x-modelschemas-model']).toBe(
+      'fal-ai/pair/a',
+    )
+    expect(schemas['output_fal-ai_pair_b']?.['x-modelschemas-model']).toBe(
+      'fal-ai/pair/b',
+    )
+    expect(schemas['input_fal-ai_pair_no-input']).toBeUndefined()
+  })
+
+  it('serves an activity larger than the 40-endpoint cap as one queue document', async () => {
+    const count = 41
+    const endpointRows = Array.from({ length: count }, (_, i) => ({
+      id: `fal/bulk/m${String(i)}`,
+      providerId: 'fal',
+      activity: 'audio' as const,
+      method: 'POST',
+      path: `/bulk/m${String(i)}`,
+    }))
+    const modelRows = Array.from({ length: count }, (_, i) => ({
+      id: `fal-bulk-m${String(i)}`,
+      providerId: 'fal',
+      rawId: `bulk/m${String(i)}`,
+      activity: 'audio' as const,
+      providerMetadata: { category: 'bulk-image' },
+      firstSeenAt: NOW,
+      lastSeenAt: NOW,
+    }))
+    const schemaRows = Array.from({ length: count }, (_, i) => ({
+      id: `fal/bulk/m${String(i)}:input`,
+      endpointId: `fal/bulk/m${String(i)}`,
+      kind: 'input' as const,
+      contentHash: `${String(i).padStart(2, '0')}${'f'.repeat(62)}`,
+      schema: JSON.stringify({
+        type: 'object',
+        properties: { n: { const: i } },
+      }),
+      createdAt: NOW,
+    }))
+    for (let i = 0; i < count; i += 10) {
+      await db
+        .insert(endpoints)
+        .values(endpointRows.slice(i, i + 10))
+        .onConflictDoNothing()
+      await db
+        .insert(models)
+        .values(modelRows.slice(i, i + 10))
+        .onConflictDoNothing()
+      await db
+        .insert(schemaVersions)
+        .values(schemaRows.slice(i, i + 10))
+        .onConflictDoNothing()
+    }
+    const result = await assembleProviderOpenApi(db, 'fal', {
+      activity: 'audio',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const paths = result.document.paths as Record<string, unknown>
+    expect(Object.keys(paths).sort()).toEqual([
+      '/{endpoint_id}',
+      '/{endpoint_id}/requests/{request_id}',
+    ])
+    const post = (
+      paths['/{endpoint_id}'] as {
+        post: {
+          parameters: Array<{ schema?: { enum?: Array<string> } }>
+          requestBody: {
+            content: {
+              'application/json': { schema: { anyOf: Array<unknown> } }
+            }
+          }
+        }
+      }
+    ).post
+    expect(post.parameters[0]?.schema?.enum).toHaveLength(count)
+    expect(
+      post.requestBody.content['application/json'].schema.anyOf,
+    ).toHaveLength(count)
   })
 
   it('refuses empty paths instead of returning 200', async () => {
@@ -420,6 +863,16 @@ describe('assembleProviderOpenApi', () => {
       code: 'unknown_model',
     })
     if (!result.ok) expect(result.message).toContain('AsyncAPI')
+
+    const byActivity = await assembleProviderOpenApi(db, 'fal', {
+      activity: 'video',
+    })
+    expect(byActivity).toMatchObject({
+      ok: false,
+      status: 400,
+      code: 'spec_requires_selector',
+    })
+    if (!byActivity.ok) expect(byActivity.message).toContain('AsyncAPI')
   })
 
   it('404s unknown provider and unknown model', async () => {

@@ -10,6 +10,7 @@ import { GPT_4O } from '../../packages/rate-card/src/fixtures/gpt-4o.ts'
 import { NANO_BANANA_2 } from '../../packages/rate-card/src/fixtures/nano-banana-2.ts'
 import {
   getModelDetail,
+  getProviderCatalog,
   listModelsCatalog,
   listProviderModels,
   listProvidersCatalog,
@@ -169,7 +170,7 @@ describe('listModelsCatalog filters', () => {
     )
     expect(fal?.spec.grain).toBe('model')
     expect(fal?._links.openapi).toMatchObject({
-      href: '/v1/openapi/fal{?model}',
+      href: '/v1/openapi/fal{?model,activity}',
       contentType: 'application/openapi+json',
       templated: true,
     })
@@ -313,7 +314,17 @@ describe('provider-scoped queries', () => {
     const result = await listProvidersCatalog(db)
     const alpha = result.providers.find((p) => p.id === 'cat-alpha')
     expect(alpha?._links.models.href).toBe('/v1/providers/cat-alpha/models')
+    expect(alpha?._links.self.href).toBe('/v1/providers/cat-alpha')
     expect(alpha?.counts.models).toBe(2)
+    expect(alpha).not.toHaveProperty('activities')
+  })
+
+  it('serves one provider with live model counts per activity', async () => {
+    const alpha = await getProviderCatalog(db, 'cat-alpha')
+    expect(alpha?.counts.models).toBe(2)
+    expect(alpha?.activities).toEqual({ chat: 1, image: 1 })
+    expect(alpha?._links.self.href).toBe('/v1/providers/cat-alpha')
+    expect(await getProviderCatalog(db, 'nope')).toBeNull()
   })
 })
 

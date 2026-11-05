@@ -13,7 +13,11 @@ import {
 import { falProvider } from './providers/fal.ts'
 import { anthropicProvider } from './providers/anthropic.ts'
 import { getProvider } from './providers/index.ts'
-import { resolveConnect, resolveSpecGrain } from './providers/connect.ts'
+import {
+  MAX_QUEUE_SPEC_PATHS,
+  resolveConnect,
+  resolveSpecGrain,
+} from './providers/connect.ts'
 
 describe('path + header helpers', () => {
   it('extracts braced path params', () => {
@@ -215,6 +219,7 @@ describe('connect profiles', () => {
   it('declares FAL as model-grained and Anthropic as provider-grained', () => {
     expect(resolveSpecGrain(falProvider)).toBe('model')
     expect(resolveSpecGrain(anthropicProvider)).toBe('provider')
+    expect(MAX_QUEUE_SPEC_PATHS).toBe(1024)
   })
 
   it('carries Anthropic version + x-api-key and FAL sibling GET', () => {

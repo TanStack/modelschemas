@@ -8,6 +8,7 @@ import { serviceIndex } from '../routes/v1/index.ts'
 import { listChanges } from './changes-api.ts'
 import {
   getModelDetail,
+  getProviderCatalog,
   listModelsCatalog,
   listProvidersCatalog,
 } from './catalog.ts'
@@ -115,11 +116,17 @@ async function resolve(target: string | Record<string, unknown>) {
     case 'status':
       expect((await getServiceStatus(db)).providers.length).toBeGreaterThan(0)
       return
-    case 'providers':
-      expect((await listProvidersCatalog(db)).providers.length).toBeGreaterThan(
-        0,
-      )
+    case 'providers': {
+      if (rest.length === 0) {
+        expect(
+          (await listProvidersCatalog(db)).providers.length,
+        ).toBeGreaterThan(0)
+        return
+      }
+      const [provider] = rest
+      expect(await getProviderCatalog(db, provider ?? '')).not.toBeNull()
       return
+    }
     case 'models': {
       if (rest.length === 0) {
         const activity = url.searchParams.get('activity')

@@ -64,7 +64,7 @@ function openApiLink(providerId: string) {
   if (!config?.connect) return undefined
   const grain = resolveSpecGrain(config)
   if (grain === 'model') {
-    return halGet(`/v1/openapi/${providerId}{?model}`, {
+    return halGet(`/v1/openapi/${providerId}{?model,activity}`, {
       contentType: OPENAPI_CONTENT_TYPE,
       example: `/v1/openapi/${providerId}?model=fal-ai/flux/dev`,
     })
@@ -222,23 +222,52 @@ function toApiModel(
 
 export type ApiModel = ReturnType<typeof toApiModel>
 
+function providerLinks(providerId: string) {
+  const openapi = openApiLink(providerId)
+  return {
+    self: halGet(`/v1/providers/${providerId}`),
+    models: halGet(`/v1/providers/${providerId}/models`),
+    schemas: halGet(`/v1/schemas/${providerId}`),
+    ...(openapi ? { openapi } : {}),
+  }
+}
+
 /** GET /v1/providers — status, counts, spec grain, and links. */
 export async function listProvidersCatalog(db: Db) {
   const status = await getServiceStatus(db)
   return {
-    providers: status.providers.map((p) => {
-      const openapi = openApiLink(p.id)
-      return {
-        ...p,
-        spec: specDescriptor(p.id, p.counts.endpoints),
-        _links: {
-          models: halGet(`/v1/providers/${p.id}/models`),
-          schemas: halGet(`/v1/schemas/${p.id}`),
-          ...(openapi ? { openapi } : {}),
-        },
-      }
-    }),
+    providers: status.providers.map((p) => ({
+      ...p,
+      spec: specDescriptor(p.id, p.counts.endpoints),
+      _links: providerLinks(p.id),
+    })),
     _links: { self: halGet('/v1/providers'), catalog: halGet('/v1/models') },
+  }
+}
+
+/**
+ * GET /v1/providers/{provider} — one provider's status row plus live model
+ * counts per activity: the `?activity=` values `GET /v1/openapi/{provider}`
+ * and `GET /v1/models` accept. Null for an unknown provider.
+ */
+export async function getProviderCatalog(db: Db, providerId: string) {
+  const status = await getServiceStatus(db)
+  const provider = status.providers.find((p) => p.id === providerId)
+  if (!provider) return null
+  const rows = await db
+    .select({ activity: models.activity, count: sql<number>`count(*)` })
+    .from(models)
+    .where(and(eq(models.providerId, providerId), isNull(models.deprecatedAt)))
+    .groupBy(models.activity)
+  const activities: Partial<Record<Activity, number>> = {}
+  for (const row of rows) {
+    if (row.activity) activities[row.activity] = row.count
+  }
+  return {
+    ...provider,
+    spec: specDescriptor(providerId, provider.counts.endpoints),
+    activities,
+    _links: providerLinks(providerId),
   }
 }
 
