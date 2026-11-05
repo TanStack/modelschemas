@@ -48,6 +48,8 @@ spec syncs daily. Responses are JSON unless noted (\`text/typescript\`,
 
 1. GET /v1 — endpoint index.
 2. GET /v1/models?activity=chat — cross-provider catalog of chat models.
+   GET /v1/providers/{provider} — one provider's status, counts, and live
+   models per activity.
 3. GET /v1/schemas — system-wide index: every provider's activities and
    endpoint ids in one response (all schemas on the system).
 4. GET /v1/schemas/anthropic — activities + endpoint ids for one provider.
@@ -56,7 +58,11 @@ spec syncs daily. Responses are JSON unless noted (\`text/typescript\`,
    Grain=provider models also accept the raw id:
    \`/v1/schemas/grok/image/grok-imagine-image-2.0?kind=input\`.
 6. GET /v1/openapi/{provider} — generation-only OpenAPI (servers, auth,
-   paths). FAL requires ?model=. A filter that matches none: 400
+   paths). FAL is one queue document: the model id is the endpoint_id path
+   parameter (x-modelschemas-encode: raw — do not percent-encode slashes).
+   Bare, the bodies are untyped; ?activity= inlines each model's own body
+   schema (up to 1024 models); ?model= is that one model's paths. A filter
+   that matches none: 400
    spec_requires_selector. HTTP only (no MCP tool).
 7. POST /v1/validate {"provider","endpointId","payload"} — check a payload.
 8. POST /v1/estimate {"provider","model","request"?,"usage"?} — {amount,

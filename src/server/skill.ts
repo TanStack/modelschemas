@@ -42,8 +42,13 @@ availability and schema questions.
      self-contained JSON Schema (URL-encode slashes in endpoint ids:
      \`chat%2Fcompletions\`). A listed model rawId also works as
      \`{endpointId}\` on grain=provider catalogs.
-   - \`GET /v1/openapi/{provider}\` — connectable generation OpenAPI
-     (FAL, currently the only model-grained provider, requires \`?model=\`)
+   - \`GET /v1/providers/{provider}\` — one provider's status, counts, and
+     live models per activity (the \`?activity=\` values).
+   - \`GET /v1/openapi/{provider}\` — connectable generation OpenAPI.
+     FAL is one queue document: the model id is the \`endpoint_id\` path
+     parameter (\`x-modelschemas-encode: raw\`, so do not percent-encode
+     slashes). Bare, the bodies are untyped; \`?activity=\` inlines each
+     model's own body schema; \`?model=\` is that one model's paths.
 3. **Authenticate for more** (5k req/h + webhooks). Easiest: the CLI —
    \`modelschemas login\` (agent-auth, autonomous mode, keys stored locally)
    or \`modelschemas login --api-key\`. Raw HTTP alternative:

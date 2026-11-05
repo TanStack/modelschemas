@@ -43,6 +43,7 @@ import { Route as V1AgentsRegisterKeyRouteImport } from './routes/v1/agents/regi
 import { Route as V1ModelsIndexRouteImport } from './routes/v1/models/index'
 import { Route as V1OpenapiProviderRouteImport } from './routes/v1/openapi/$provider'
 import { Route as V1ProvidersIndexRouteImport } from './routes/v1/providers/index'
+import { Route as V1ProvidersProviderRouteImport } from './routes/v1/providers/$provider'
 import { Route as V1SchemasIndexRouteImport } from './routes/v1/schemas/index'
 import { Route as V1SubscriptionsIndexRouteImport } from './routes/v1/subscriptions/index'
 import { Route as V1SubscriptionsIdRouteImport } from './routes/v1/subscriptions/$id'
@@ -231,6 +232,11 @@ const V1ProvidersIndexRoute = V1ProvidersIndexRouteImport.update({
   path: '/v1/providers/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const V1ProvidersProviderRoute = V1ProvidersProviderRouteImport.update({
+  id: '/v1/providers/$provider',
+  path: '/v1/providers/$provider',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const V1SchemasIndexRoute = V1SchemasIndexRouteImport.update({
   id: '/v1/schemas/',
   path: '/v1/schemas/',
@@ -275,9 +281,9 @@ const V1ModelsProviderModelIdRoute = V1ModelsProviderModelIdRouteImport.update({
 } as any)
 const V1ProvidersProviderModelsRoute =
   V1ProvidersProviderModelsRouteImport.update({
-    id: '/v1/providers/$provider/models',
-    path: '/v1/providers/$provider/models',
-    getParentRoute: () => rootRouteImport,
+    id: '/models',
+    path: '/models',
+    getParentRoute: () => V1ProvidersProviderRoute,
   } as any)
 const V1SchemasProviderIndexRoute = V1SchemasProviderIndexRouteImport.update({
   id: '/v1/schemas/$provider/',
@@ -330,6 +336,7 @@ export interface FileRoutesByFullPath {
   '/v1/agents/me': typeof V1AgentsMeRoute
   '/v1/agents/register-key': typeof V1AgentsRegisterKeyRoute
   '/v1/openapi/$provider': typeof V1OpenapiProviderRoute
+  '/v1/providers/$provider': typeof V1ProvidersProviderRouteWithChildren
   '/v1/subscriptions/$id': typeof V1SubscriptionsIdRoute
   '/v1/models/': typeof V1ModelsIndexRoute
   '/v1/providers/': typeof V1ProvidersIndexRoute
@@ -378,6 +385,7 @@ export interface FileRoutesByTo {
   '/v1/agents/me': typeof V1AgentsMeRoute
   '/v1/agents/register-key': typeof V1AgentsRegisterKeyRoute
   '/v1/openapi/$provider': typeof V1OpenapiProviderRoute
+  '/v1/providers/$provider': typeof V1ProvidersProviderRouteWithChildren
   '/v1/subscriptions/$id': typeof V1SubscriptionsIdRoute
   '/v1/models': typeof V1ModelsIndexRoute
   '/v1/providers': typeof V1ProvidersIndexRoute
@@ -427,6 +435,7 @@ export interface FileRoutesById {
   '/v1/agents/me': typeof V1AgentsMeRoute
   '/v1/agents/register-key': typeof V1AgentsRegisterKeyRoute
   '/v1/openapi/$provider': typeof V1OpenapiProviderRoute
+  '/v1/providers/$provider': typeof V1ProvidersProviderRouteWithChildren
   '/v1/subscriptions/$id': typeof V1SubscriptionsIdRoute
   '/v1/models/': typeof V1ModelsIndexRoute
   '/v1/providers/': typeof V1ProvidersIndexRoute
@@ -477,6 +486,7 @@ export interface FileRouteTypes {
     | '/v1/agents/me'
     | '/v1/agents/register-key'
     | '/v1/openapi/$provider'
+    | '/v1/providers/$provider'
     | '/v1/subscriptions/$id'
     | '/v1/models/'
     | '/v1/providers/'
@@ -525,6 +535,7 @@ export interface FileRouteTypes {
     | '/v1/agents/me'
     | '/v1/agents/register-key'
     | '/v1/openapi/$provider'
+    | '/v1/providers/$provider'
     | '/v1/subscriptions/$id'
     | '/v1/models'
     | '/v1/providers'
@@ -573,6 +584,7 @@ export interface FileRouteTypes {
     | '/v1/agents/me'
     | '/v1/agents/register-key'
     | '/v1/openapi/$provider'
+    | '/v1/providers/$provider'
     | '/v1/subscriptions/$id'
     | '/v1/models/'
     | '/v1/providers/'
@@ -622,6 +634,7 @@ export interface RootRouteChildren {
   V1AgentsMeRoute: typeof V1AgentsMeRoute
   V1AgentsRegisterKeyRoute: typeof V1AgentsRegisterKeyRoute
   V1OpenapiProviderRoute: typeof V1OpenapiProviderRoute
+  V1ProvidersProviderRoute: typeof V1ProvidersProviderRouteWithChildren
   V1SubscriptionsIdRoute: typeof V1SubscriptionsIdRoute
   V1ModelsIndexRoute: typeof V1ModelsIndexRoute
   V1ProvidersIndexRoute: typeof V1ProvidersIndexRoute
@@ -632,7 +645,6 @@ export interface RootRouteChildren {
   V1AdminExtractFalRoute: typeof V1AdminExtractFalRoute
   V1AdminSyncProviderRoute: typeof V1AdminSyncProviderRoute
   V1ModelsProviderModelIdRoute: typeof V1ModelsProviderModelIdRoute
-  V1ProvidersProviderModelsRoute: typeof V1ProvidersProviderModelsRoute
   V1SchemasProviderIndexRoute: typeof V1SchemasProviderIndexRoute
   V1SchemasProviderActivitySplatRoute: typeof V1SchemasProviderActivitySplatRoute
   V1SchemasProviderActivityIndexRoute: typeof V1SchemasProviderActivityIndexRoute
@@ -878,6 +890,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof V1ProvidersIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/v1/providers/$provider': {
+      id: '/v1/providers/$provider'
+      path: '/v1/providers/$provider'
+      fullPath: '/v1/providers/$provider'
+      preLoaderRoute: typeof V1ProvidersProviderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/v1/schemas/': {
       id: '/v1/schemas/'
       path: '/v1/schemas'
@@ -936,10 +955,10 @@ declare module '@tanstack/react-router' {
     }
     '/v1/providers/$provider/models': {
       id: '/v1/providers/$provider/models'
-      path: '/v1/providers/$provider/models'
+      path: '/models'
       fullPath: '/v1/providers/$provider/models'
       preLoaderRoute: typeof V1ProvidersProviderModelsRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof V1ProvidersProviderRoute
     }
     '/v1/schemas/$provider/': {
       id: '/v1/schemas/$provider/'
@@ -964,6 +983,17 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface V1ProvidersProviderRouteChildren {
+  V1ProvidersProviderModelsRoute: typeof V1ProvidersProviderModelsRoute
+}
+
+const V1ProvidersProviderRouteChildren: V1ProvidersProviderRouteChildren = {
+  V1ProvidersProviderModelsRoute: V1ProvidersProviderModelsRoute,
+}
+
+const V1ProvidersProviderRouteWithChildren =
+  V1ProvidersProviderRoute._addFileChildren(V1ProvidersProviderRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -1001,6 +1031,7 @@ const rootRouteChildren: RootRouteChildren = {
   V1AgentsMeRoute: V1AgentsMeRoute,
   V1AgentsRegisterKeyRoute: V1AgentsRegisterKeyRoute,
   V1OpenapiProviderRoute: V1OpenapiProviderRoute,
+  V1ProvidersProviderRoute: V1ProvidersProviderRouteWithChildren,
   V1SubscriptionsIdRoute: V1SubscriptionsIdRoute,
   V1ModelsIndexRoute: V1ModelsIndexRoute,
   V1ProvidersIndexRoute: V1ProvidersIndexRoute,
@@ -1011,7 +1042,6 @@ const rootRouteChildren: RootRouteChildren = {
   V1AdminExtractFalRoute: V1AdminExtractFalRoute,
   V1AdminSyncProviderRoute: V1AdminSyncProviderRoute,
   V1ModelsProviderModelIdRoute: V1ModelsProviderModelIdRoute,
-  V1ProvidersProviderModelsRoute: V1ProvidersProviderModelsRoute,
   V1SchemasProviderIndexRoute: V1SchemasProviderIndexRoute,
   V1SchemasProviderActivitySplatRoute: V1SchemasProviderActivitySplatRoute,
   V1SchemasProviderActivityIndexRoute: V1SchemasProviderActivityIndexRoute,

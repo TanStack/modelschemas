@@ -5,10 +5,11 @@
  * the live or pinned `model` enum, and moves output onto the sibling GET
  * when `connect.siblingGet` is set.
  */
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
+import type { SQL } from 'drizzle-orm'
 
 import type { Db } from '#/db/index.ts'
-import { activities, endpoints, schemaVersions } from '#/db/schema.ts'
+import { activities, endpoints, models, schemaVersions } from '#/db/schema.ts'
 import type { Activity } from '#/db/schema.ts'
 import {
   getModelDetail,
@@ -18,6 +19,7 @@ import {
 import { contentHash } from '#/server/kv.ts'
 import { getProvider } from '#/server/providers/index.ts'
 import {
+  MAX_QUEUE_SPEC_PATHS,
   requiredHeaderParameters,
   resolveSpecGrain,
 } from '#/server/providers/connect.ts'
@@ -56,7 +58,11 @@ interface LoadedEndpoint {
    */
   responseContentTypes: Array<string> | null
   specRevision: string | null
+  /** Set when the endpoint was selected for a queue document. */
+  modelRawId?: string
 }
+
+const QUEUE_PATH = '/{endpoint_id}'
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -237,12 +243,12 @@ function refuseModelGrained(
   count: number,
 ): AssembleOpenApiResult {
   const example = `GET /v1/openapi/${providerId}?model=`
-  const models = `GET /v1/providers/${providerId}/models`
+  const modelList = `GET /v1/providers/${providerId}/models`
   return {
     ok: false,
     status: 400,
     code: 'spec_requires_selector',
-    message: `Provider '${providerId}' is model-grained (${String(count)} endpoints) — there is no combined OpenAPI document. Pass ?model={rawId}, e.g. ${example}<rawId>. List models: ${models}.`,
+    message: `Provider '${providerId}' is model-grained (${String(count)} endpoints) — there is no combined OpenAPI document. Pass ?model={rawId}, e.g. ${example}<rawId>. List models: ${modelList}.`,
   }
 }
 
@@ -268,10 +274,16 @@ function applyConnectProfile(
   }
 }
 
+/**
+ * `bodies: false` fetches presence only: a stored schema arrives as `{}`,
+ * so `input !== undefined` still holds without shipping and parsing every
+ * body. The lean queue document emits none of them.
+ */
 async function loadEndpoints(
   db: Db,
   providerId: string,
   activity: Activity | undefined,
+  bodies = true,
 ): Promise<Array<LoadedEndpoint>> {
   const rows = await db
     .select({
@@ -283,7 +295,11 @@ async function loadEndpoints(
       requestContentType: endpoints.requestContentType,
       responseContentTypes: endpoints.responseContentTypes,
       kind: schemaVersions.kind,
-      schema: schemaVersions.schema,
+      schema: bodies
+        ? schemaVersions.schema
+        : sql<
+            string | null
+          >`CASE WHEN ${schemaVersions.schema} IS NULL THEN NULL ELSE '{}' END`,
       specRevision: schemaVersions.specRevision,
     })
     .from(endpoints)
@@ -432,6 +448,226 @@ function buildSiblingGet(
   }
 }
 
+interface QueueModel {
+  rawId: string
+  capabilities: unknown
+}
+
+/** Live rows for a queue document, narrowed to one activity when given. */
+async function loadQueueModels(
+  db: Db,
+  providerId: string,
+  activity: Activity | undefined,
+): Promise<Array<QueueModel>> {
+  const conditions: Array<SQL> = [
+    eq(models.providerId, providerId),
+    isNull(models.deprecatedAt),
+  ]
+  if (activity) conditions.push(eq(models.activity, activity))
+  return db
+    .select({
+      rawId: models.rawId,
+      capabilities: models.capabilities,
+    })
+    .from(models)
+    .where(and(...conditions))
+    .orderBy(models.rawId)
+}
+
+/**
+ * One endpoint per queue model. The raw id is the queue path value
+ * (`https://queue.fal.run/{rawId}`), which is not the same string as the
+ * stored path (`/{rawId}`). A model with no stored endpoint is left out.
+ */
+function selectQueueEndpoints(
+  loaded: Array<LoadedEndpoint>,
+  rawIds: Array<string>,
+): Array<LoadedEndpoint> {
+  // Every key endpointMatchesModel accepts, so the match is one lookup.
+  const byKey = new Map<string, string>()
+  for (const rawId of rawIds) {
+    byKey.set(rawId, rawId)
+    byKey.set(`/${rawId}`, rawId)
+  }
+  const pending = new Set(rawIds)
+  const selected: Array<LoadedEndpoint> = []
+  for (const endpoint of loaded) {
+    const matched = byKey.get(endpoint.id) ?? byKey.get(endpoint.path)
+    if (matched === undefined || !pending.has(matched)) continue
+    pending.delete(matched)
+    selected.push({ ...endpoint, modelRawId: matched })
+  }
+  selected.sort((a, b) =>
+    (a.modelRawId ?? '').localeCompare(b.modelRawId ?? ''),
+  )
+  return selected
+}
+
+/** Component key. OpenAPI names are letters, digits, `.`, `_`, and `-`. */
+function schemaComponentKey(
+  kind: 'input' | 'output',
+  rawId: string,
+  used: Set<string>,
+): string {
+  const slug = rawId.replace(/[^A-Za-z0-9._-]+/g, '_')
+  let key = `${kind}_${slug}`
+  if (!/^[A-Za-z_]/.test(key)) key = `m_${key}`
+  key = key.slice(0, 240)
+  let unique = key
+  let n = 2
+  while (used.has(unique)) {
+    unique = `${key.slice(0, 220)}_${String(n)}`
+    n += 1
+  }
+  used.add(unique)
+  return unique
+}
+
+function withModelAnnotation(schema: unknown, rawId: string): unknown {
+  if (isObject(schema)) return { ...schema, 'x-modelschemas-model': rawId }
+  return { 'x-modelschemas-model': rawId, allOf: [schema] }
+}
+
+function schemaUnion(
+  refs: Array<Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  if (refs.length === 1) return refs[0]
+  // anyOf: FAL inputs overlap (prompt, image_url, …), so a valid body for
+  // one model often satisfies several schemas. oneOf would reject it.
+  if (refs.length > 1) return { anyOf: refs }
+  return undefined
+}
+
+/**
+ * OpenAPI path templating matches one segment and percent-encodes
+ * reserved characters. FAL ids contain slashes, so generators must append
+ * the raw id. `x-modelschemas-encode: raw` is that contract.
+ */
+function queueEndpointParameter(
+  rawIds: Array<string>,
+): Record<string, unknown> {
+  return {
+    name: 'endpoint_id',
+    in: 'path',
+    required: true,
+    'x-modelschemas-encode': 'raw',
+    description:
+      'Model raw id. Slashes are path segments: fal-ai/flux/dev is https://queue.fal.run/fal-ai/flux/dev, not fal-ai%2Fflux%2Fdev. x-modelschemas-encode is raw — do not percent-encode this value.',
+    schema: { type: 'string', enum: rawIds },
+  }
+}
+
+/**
+ * One queue client: `POST /{endpoint_id}` and
+ * `GET /{endpoint_id}/requests/{request_id}`. A model is in `endpoint_id`
+ * only when it has an input schema. The request `anyOf` is those schemas,
+ * in enum order. The result schema is included only when every included
+ * model has an output schema, in the same order. A partial set is omitted
+ * rather than filled with another model's schema.
+ *
+ * `lean` (no `?activity=`: every live model) keeps the enum and leaves the
+ * bodies untyped — a thousand inlined schemas is not a client. Each
+ * model's own schema stays at `GET /v1/schemas/{provider}/...`.
+ */
+function buildQueueDocument(
+  providerId: string,
+  selected: Array<LoadedEndpoint>,
+  connect: ProviderConnect,
+  lean: boolean,
+):
+  | {
+      paths: Record<string, Record<string, unknown>>
+      schemas: Record<string, unknown>
+    }
+  | { empty: true } {
+  const typed = selected.filter(
+    (
+      endpoint,
+    ): endpoint is LoadedEndpoint & { modelRawId: string; input: unknown } =>
+      endpoint.modelRawId !== undefined && endpoint.input !== undefined,
+  )
+  if (typed.length === 0) return { empty: true }
+  const used = new Set<string>()
+  const schemas: Record<string, unknown> = {}
+  const inputRefs: Array<Record<string, unknown>> = []
+  const outputRefs: Array<Record<string, unknown>> = []
+  const rawIds = typed.map((endpoint) => endpoint.modelRawId)
+  const outputsComplete = typed.every(
+    (endpoint) => endpoint.output !== undefined,
+  )
+  for (const endpoint of typed) {
+    if (lean) break
+    const rawId = endpoint.modelRawId
+    const inputName = schemaComponentKey('input', rawId, used)
+    schemas[inputName] = withModelAnnotation(endpoint.input, rawId)
+    inputRefs.push({ $ref: `#/components/schemas/${inputName}` })
+    if (!outputsComplete || endpoint.output === undefined) continue
+    const outputName = schemaComponentKey('output', rawId, used)
+    schemas[outputName] = withModelAnnotation(endpoint.output, rawId)
+    outputRefs.push({ $ref: `#/components/schemas/${outputName}` })
+  }
+  const activitiesPresent = new Set(typed.map((endpoint) => endpoint.activity))
+  const onlyActivity =
+    activitiesPresent.size === 1 ? typed[0]?.activity : undefined
+  const endpointParam = queueEndpointParameter(rawIds)
+  const input = lean
+    ? {
+        type: 'object',
+        description: `The model's own input schema: GET /v1/schemas/${providerId}/{activity}/{endpoint_id}?kind=input. Pass ?activity= on this document to inline them.`,
+      }
+    : schemaUnion(inputRefs)
+  const output = !lean && outputsComplete ? schemaUnion(outputRefs) : undefined
+  const post: Record<string, unknown> = {
+    operationId: operationId(providerId, 'post', QUEUE_PATH),
+    summary: onlyActivity
+      ? `Queue a ${onlyActivity} generation`
+      : 'Queue a generation',
+    ...(onlyActivity ? { 'x-modelschemas-activity': onlyActivity } : {}),
+    parameters: [endpointParam, ...headerParams(connect.requiredHeaders)],
+    ...(input
+      ? { requestBody: { required: true, ...requestMedia(input, null) } }
+      : {}),
+    responses: {
+      '200': {
+        description: 'Success',
+        ...(connect.siblingGet ? {} : (responseMedia(output, null) ?? {})),
+      },
+    },
+  }
+  const paths: Record<string, Record<string, unknown>> = {
+    [QUEUE_PATH]: { post },
+  }
+  if (connect.siblingGet) {
+    const requestPath = siblingRequestPath(QUEUE_PATH)
+    paths[requestPath] = {
+      get: {
+        operationId: operationId(providerId, 'get', requestPath),
+        summary: 'Fetch a queued request result',
+        ...(onlyActivity ? { 'x-modelschemas-activity': onlyActivity } : {}),
+        parameters: [
+          endpointParam,
+          {
+            name: 'request_id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              lean || outputsComplete
+                ? 'Queued result'
+                : `Queued result. Untyped: ${String(typed.filter((endpoint) => endpoint.output === undefined).length)} of ${String(typed.length)} models have no stored output schema, so no result union is published. GET /v1/schemas/${providerId}/{activity}/{endpoint_id}?kind=output for one model.`,
+            ...(output ? responseMedia(output, null) : {}),
+          },
+        },
+      },
+    }
+  }
+  return { paths, schemas }
+}
+
 export function operationsFor(
   providerId: string,
   endpoint: LoadedEndpoint,
@@ -493,6 +729,10 @@ export function operationsFor(
  * Assemble GET /v1/openapi/{provider}. Refuses combined documents for
  * model-grained providers; a provider-grained document is never capped by
  * path count — client generation needs the whole generation surface (#560).
+ * A model-grained queue provider (FAL) with no `?model=` is one queue
+ * document: `endpoint_id` enumerates every live model with an input schema;
+ * `?activity=` narrows the enum and inlines each model's own body schema
+ * (up to {@link MAX_QUEUE_SPEC_PATHS}).
  */
 export async function assembleProviderOpenApi(
   db: Db,
@@ -553,7 +793,31 @@ export async function assembleProviderOpenApi(
     }
   }
 
-  const loaded = await loadEndpoints(db, providerId, activity)
+  // A model-grained provider whose POST answers with a queue ack is one
+  // queue document when no model is pinned; ?activity= narrows it.
+  const queue =
+    grain === 'model' &&
+    pinnedModel === undefined &&
+    config?.connect?.siblingGet === true
+  const lean = queue && activity === undefined
+  let queueRawIds: Array<string> | undefined
+  if (queue) {
+    const listed = await loadQueueModels(db, providerId, activity)
+    const httpModels = listed.filter(
+      (model) => !hasAsyncApiFlag(model.capabilities),
+    )
+    if (listed.length > 0 && httpModels.length === 0) {
+      return {
+        ok: false,
+        status: 400,
+        code: 'spec_requires_selector',
+        message: `Activity '${activity ?? ''}' on '${providerId}' has no HTTP OpenAPI models (the listed rows publish AsyncAPI). Use GET /v1/schemas/${providerId}.`,
+      }
+    }
+    queueRawIds = httpModels.map((model) => model.rawId)
+  }
+
+  const loaded = await loadEndpoints(db, providerId, activity, !lean)
   let selected = loaded
   if (pinnedModel !== undefined) {
     const matching = loaded.filter((e) =>
@@ -568,9 +832,11 @@ export async function assembleProviderOpenApi(
         message: `Model '${pinnedModel}' is listed for '${providerId}' but has no classified generation endpoint (no path matching that raw id). List endpoints: GET /v1/schemas/${providerId}. If the model is new, wait for spec sync or POST /v1/admin/sync/${providerId}. Catalog: GET /v1/providers/${providerId}/models.`,
       }
     }
+  } else if (queueRawIds !== undefined) {
+    selected = selectQueueEndpoints(loaded, queueRawIds)
   }
 
-  if (grain === 'model' && pinnedModel === undefined) {
+  if (grain === 'model' && pinnedModel === undefined && !queue) {
     return refuseModelGrained(providerId, loaded.length)
   }
 
@@ -590,6 +856,15 @@ export async function assembleProviderOpenApi(
     }
   }
 
+  if (queue && !lean && selected.length > MAX_QUEUE_SPEC_PATHS) {
+    return {
+      ok: false,
+      status: 400,
+      code: 'spec_requires_selector',
+      message: `Activity '${activity ?? ''}' matches ${String(selected.length)} endpoints (cap ${String(MAX_QUEUE_SPEC_PATHS)}). Pin ?model={rawId}, or drop ?activity= for the whole-catalog document with untyped bodies. Counts per activity: GET /v1/providers/${providerId}.`,
+    }
+  }
+
   if (!connect || connect.servers.length === 0) {
     return {
       ok: false,
@@ -599,45 +874,67 @@ export async function assembleProviderOpenApi(
     }
   }
 
-  const modelIds = pinnedModel
-    ? [pinnedModel]
-    : (
-        await listModelsCatalog(db, {
-          provider: providerId,
-          activity,
-        })
-      ).models.map((m) => m.rawId)
+  let queueSchemas: Record<string, unknown> | undefined
   const paths: Record<string, Record<string, unknown>> = {}
-  for (const endpoint of selected) {
-    for (const op of operationsFor(
-      providerId,
-      endpoint,
-      connect,
-      modelIds,
-      pinnedModel,
-    )) {
-      const item = paths[op.path] ?? {}
-      item[op.method] = op.operation
-      paths[op.path] = item
+  if (queue) {
+    const built = buildQueueDocument(providerId, selected, connect, lean)
+    if ('empty' in built) {
+      return {
+        ok: false,
+        status: 400,
+        code: 'spec_requires_selector',
+        message: `No input schemas to publish for '${providerId}'${activity ? ` activity '${activity}'` : ''}. List endpoints: GET /v1/schemas/${providerId}.`,
+      }
+    }
+    Object.assign(paths, built.paths)
+    queueSchemas = built.schemas
+  } else {
+    const modelIds = pinnedModel
+      ? [pinnedModel]
+      : (
+          await listModelsCatalog(db, {
+            provider: providerId,
+            activity,
+          })
+        ).models.map((m) => m.rawId)
+    for (const endpoint of selected) {
+      for (const op of operationsFor(
+        providerId,
+        endpoint,
+        connect,
+        modelIds,
+        pinnedModel,
+      )) {
+        const item = paths[op.path] ?? {}
+        item[op.method] = op.operation
+        paths[op.path] = item
+      }
     }
   }
 
   const revision =
     selected.find((e) => e.specRevision)?.specRevision ?? 'current'
+  const components: Record<string, unknown> = {}
+  if (Object.keys(connect.securitySchemes).length > 0) {
+    components.securitySchemes = connect.securitySchemes
+  }
+  if (queueSchemas && Object.keys(queueSchemas).length > 0) {
+    components.schemas = queueSchemas
+  }
   const document: Record<string, unknown> = {
     openapi: '3.1.0',
     info: {
       title: `${config?.displayName ?? providerId} (modelschemas)`,
       version: revision,
-      description: `Generation-only OpenAPI assembled by modelschemas from live endpoint schemas. Call this provider directly with your own key — this is not a proxy.`,
+      description: queue
+        ? `Generation-only OpenAPI assembled by modelschemas from live endpoint schemas. Call this provider directly with your own key — this is not a proxy. One queue client: endpoint_id is the model raw id${lean ? "; bodies are untyped here, pass ?activity= to inline each model's own schema" : ", and each component schema is that model's own body (x-modelschemas-model)"}.`
+        : `Generation-only OpenAPI assembled by modelschemas from live endpoint schemas. Call this provider directly with your own key — this is not a proxy.`,
     },
     servers: connect.servers,
     ...(Object.keys(connect.securitySchemes).length > 0
-      ? {
-          security: connect.security,
-          components: { securitySchemes: connect.securitySchemes },
-        }
+      ? { security: connect.security }
       : {}),
+    ...(Object.keys(components).length > 0 ? { components } : {}),
     paths,
   }
 
