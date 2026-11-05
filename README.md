@@ -200,6 +200,28 @@ and `@modelschemas/client` types its responses from it.
 - A change that is not additive is also recorded in
   [docs/api-changes.md](docs/api-changes.md).
 
+### Generation OpenAPI (`GET /v1/openapi/{provider}`)
+
+One operation per endpoint. A response that can be JSON or a stream lists
+`application/json` (or `text/plain`) and `text/event-stream` under one
+`200`, as OpenAI's own spec does. Each schema's `$defs` are hoisted into
+`components.schemas`, so every `$ref` resolves within the document;
+identical definitions share one name, and a name two endpoints define
+differently gets a content-hash suffix. An upstream `#stream` path key
+(Mistral transcriptions) is merged into its base operation: the request
+body is `anyOf` both variants (`stream: false` / `stream: true`). A
+document that would still hold an unresolved `$ref` is refused with
+`500 unresolved_refs`, naming the ref and where it sits; twins that list
+one media type with different schemas are refused with
+`500 schema_conflict`.
+
+**Breaking:** the `{path}#stream` SSE twins are gone. hey-api 0.99.0 types
+a JSON-or-SSE response as JSON only and returns the stream as one string
+([hey-api/hey-api#4482](https://github.com/hey-api/hey-api/issues/4482)),
+so a hey-api client loses typed streaming until that is fixed. Kubb v5
+handles it: the response is a union keyed by content type, and
+`toEventStream()` yields typed events.
+
 ## Examples
 
 Three TanStack Start apps in [`examples/`](./examples) exercise the

@@ -15,7 +15,7 @@ import type { OpenApiDocument } from '#/server/providers/types.ts'
  * provider's classify/fetchSpec could alter derived schemas — it tells
  * verifiers which extractor produced a stored hash.
  */
-export const EXTRACTOR_VERSION = '1'
+export const EXTRACTOR_VERSION = '2'
 
 export type JsonValue =
   | string
@@ -53,9 +53,8 @@ export interface ExtractedEndpointSchemas {
   streamOutput?: Record<string, JsonValue>
   /**
    * Success-response media types to publish. JSON and `text/event-stream`
-   * are both kept. The generation document puts them on two operations,
-   * because `@hey-api/openapi-ts` keeps only `application/json` when both
-   * are listed on one operation. Audio and other non-JSON types stay.
+   * are both kept, on one operation in the generation document. Audio and
+   * other non-JSON types stay.
    */
   outputContentTypes?: Array<string>
   warnings: Array<string>
@@ -165,11 +164,26 @@ export function bundleSchema(
   }
   if (closure.size === 0) return { schema, warnings }
 
-  const defs: Record<string, JsonValue> = {}
+  // An inline schema can carry its own `$defs` (Mistral's speech stream):
+  // keep them beside the component closure.
+  const defs: Record<string, JsonValue> = isObject(schema.$defs)
+    ? { ...schema.$defs }
+    : {}
   for (const refName of [...closure].sort()) {
     const target = resolveSchema(refName)
     if (target === undefined) continue
-    defs[refName] = rewriteRefs(target, rootName)
+    const rewritten = rewriteRefs(target, rootName)
+    const local = defs[refName]
+    if (
+      local !== undefined &&
+      JSON.stringify(local) !== JSON.stringify(rewritten)
+    ) {
+      warnings.push(
+        `${context}: local $defs '${refName}' differs from the component of the same name; kept the local one`,
+      )
+      continue
+    }
+    defs[refName] = rewritten
   }
   return { schema: { ...schema, $defs: defs }, warnings }
 }

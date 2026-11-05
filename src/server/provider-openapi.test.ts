@@ -7,8 +7,9 @@ import {
   operationsFor,
   pathParamsFromPath,
   requestMedia,
+  hoistSchemaDefs,
   responseMedia,
-  streamOperationPath,
+  unresolvedRefs,
 } from './provider-openapi.ts'
 import { falProvider } from './providers/fal.ts'
 import { anthropicProvider } from './providers/anthropic.ts'
@@ -128,7 +129,7 @@ describe('generation media types', () => {
     })
   })
 
-  it('splits a JSON and SSE success body into two posts on the real URL', () => {
+  it('keeps JSON and SSE on one post, as the official OpenAI spec does', () => {
     const chunk = { type: 'object', properties: { delta: { type: 'string' } } }
     const ops = operationsFor(
       'openai',
@@ -155,23 +156,14 @@ describe('generation media types', () => {
     )
     expect(ops.map((op) => [op.method, op.path])).toEqual([
       ['post', '/chat/completions'],
-      ['post', streamOperationPath('/chat/completions')],
     ])
-    const json = ops[0]?.operation.responses as {
+    const responses = ops[0]?.operation.responses as {
       '200': { content: Record<string, { schema: unknown }> }
     }
-    const stream = ops[1]?.operation.responses as {
-      '200': { content: Record<string, { schema: unknown }> }
-    }
-    expect(json['200'].content).toEqual({
+    expect(responses['200'].content).toEqual({
       'application/json': { schema },
-    })
-    expect(stream['200'].content).toEqual({
       'text/event-stream': { schema: chunk },
     })
-    expect(ops[1]?.operation.operationId).not.toBe(
-      ops[0]?.operation.operationId,
-    )
   })
 
   it('describes audio responses as binary and keeps a stream schema beside them', () => {
@@ -246,5 +238,90 @@ describe('connect profiles', () => {
 
   it('does not guess a connect profile from modelsEndpoint', () => {
     expect(resolveConnect(getProvider('voyage'))).toBeNull()
+  })
+})
+
+describe('hoistSchemaDefs', () => {
+  const body = (schema: unknown) => ({
+    post: {
+      requestBody: { content: { 'application/json': { schema } } },
+      responses: { '200': { content: { 'application/json': { schema } } } },
+    },
+  })
+
+  it('moves $defs into components, dedupes, and renames a clash by content', () => {
+    const a = {
+      type: 'object',
+      properties: {
+        x: { $ref: '#/$defs/Shared' },
+        y: { $ref: '#/$defs/Item' },
+      },
+      $defs: {
+        Shared: { type: 'string' },
+        Item: { type: 'object', properties: { s: { $ref: '#/$defs/Shared' } } },
+      },
+    }
+    const b = {
+      type: 'object',
+      properties: {
+        x: { $ref: '#/$defs/Shared' },
+        y: { $ref: '#/$defs/Item' },
+      },
+      $defs: { Shared: { type: 'string' }, Item: { type: 'integer' } },
+      discriminator: {
+        propertyName: 'kind',
+        mapping: { item: '#/components/schemas/Item' },
+      },
+    }
+    const paths: Record<string, Record<string, unknown>> = {
+      '/a': body(a),
+      '/b': body(b),
+    }
+    const schemas = hoistSchemaDefs(Object.values(paths), {})
+    const document = { paths, components: { schemas } }
+    expect(unresolvedRefs(document)).toEqual([])
+    expect(JSON.stringify(document)).not.toContain('$defs')
+    const names = Object.keys(schemas).sort()
+    expect(names).toHaveLength(3)
+    expect(names).toContain('Shared')
+    expect(names).toContain('Item')
+    expect(schemas.Item).toEqual({
+      type: 'object',
+      properties: { s: { $ref: '#/components/schemas/Shared' } },
+    })
+    const renamed = names.find((name) => name.startsWith('Item_'))
+    expect(renamed && schemas[renamed]).toEqual({ type: 'integer' })
+    const bBody = (
+      paths['/b']!.post as {
+        requestBody: {
+          content: Record<
+            string,
+            { schema: { discriminator: { mapping: Record<string, string> } } }
+          >
+        }
+      }
+    ).requestBody.content['application/json']?.schema
+    expect(bBody?.discriminator.mapping.item).toBe(
+      `#/components/schemas/${renamed ?? ''}`,
+    )
+  })
+
+  it('turns a root self-reference into a component', () => {
+    const tree = {
+      type: 'object',
+      properties: { children: { type: 'array', items: { $ref: '#' } } },
+    }
+    const paths: Record<string, Record<string, unknown>> = { '/t': body(tree) }
+    const schemas = hoistSchemaDefs(Object.values(paths), { named: tree })
+    expect(unresolvedRefs({ paths, components: { schemas } })).toEqual([])
+    expect(schemas.named).toEqual({
+      type: 'object',
+      properties: {
+        children: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/named' },
+        },
+      },
+    })
   })
 })

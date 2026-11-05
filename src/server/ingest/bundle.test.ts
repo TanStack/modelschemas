@@ -290,6 +290,28 @@ describe('bundleSchema', () => {
     expect(findDanglingRefs(schema)).toEqual([])
   })
 
+  it("keeps an inline schema's own $defs beside the component closure (Mistral speech stream)", () => {
+    const { schema, warnings } = bundleSchema(
+      {
+        type: 'object',
+        properties: {
+          event: { $ref: '#/$defs/EventTypes' },
+          data: { $ref: '#/components/schemas/Delta' },
+        },
+        $defs: { EventTypes: { type: 'string', enum: ['delta'] } },
+      },
+      { Delta: { type: 'object' } },
+      null,
+      'test',
+    )
+    expect(warnings).toEqual([])
+    expect(Object.keys(schema.$defs as object).sort()).toEqual([
+      'Delta',
+      'EventTypes',
+    ])
+    expect(findDanglingRefs(schema)).toEqual([])
+  })
+
   it('records warnings for dangling refs instead of throwing', () => {
     const { schema, warnings } = bundleSchema(
       {
