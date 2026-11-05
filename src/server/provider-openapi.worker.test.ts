@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm'
 
 import { endpoints, models, providers, schemaVersions } from '#/db/schema.ts'
 import { assembleProviderOpenApi } from './provider-openapi.ts'
+import { unresolvedRefs } from './fixtures/unresolved-refs.ts'
 
 const NOW = 1_781_150_000
 const INPUT = {
@@ -808,10 +809,245 @@ describe('assembleProviderOpenApi', () => {
         .values(rows.slice(i, i + 10))
         .onConflictDoNothing()
     }
-    const result = await assembleProviderOpenApi(db, 'openai')
+    const result = await assembleProviderOpenApi(db, 'openai', {
+      activity: 'chat',
+    })
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(Object.keys(result.document.paths as object)).toHaveLength(41)
+  })
+
+  it('serves JSON and SSE on one operation and every $ref resolves (#578)', async () => {
+    await db
+      .insert(providers)
+      .values({
+        id: 'openai',
+        displayName: 'OpenAI',
+        specSourceUrl: 'https://example.com/o.json',
+      })
+      .onConflictDoNothing()
+    const both = ['application/json', 'text/event-stream']
+    await db
+      .insert(endpoints)
+      .values([
+        {
+          id: 'openai/images/generations',
+          providerId: 'openai',
+          activity: 'image',
+          method: 'POST',
+          path: '/images/generations',
+          responseContentTypes: both,
+        },
+        {
+          id: 'openai/images/edits',
+          providerId: 'openai',
+          activity: 'image',
+          method: 'POST',
+          path: '/images/edits',
+          requestContentType: 'multipart/form-data',
+          responseContentTypes: both,
+        },
+      ])
+      .onConflictDoNothing()
+    const withDefs = (defs: Record<string, unknown>) =>
+      JSON.stringify({
+        type: 'object',
+        properties: {
+          size: { $ref: '#/$defs/ImageSize' },
+          usage: { $ref: '#/$defs/Usage' },
+        },
+        $defs: defs,
+      })
+    const usage = {
+      type: 'object',
+      properties: { tokens: { $ref: '#/$defs/Count' } },
+    }
+    const version = (
+      id: string,
+      kind: 'input' | 'output' | 'stream',
+      schema: string,
+    ) => ({
+      id: `${id}:${kind}`,
+      endpointId: id,
+      kind,
+      contentHash: `${id}:${kind}`.padEnd(64, '0'),
+      schema,
+      createdAt: NOW,
+    })
+    await db
+      .insert(schemaVersions)
+      .values([
+        version(
+          'openai/images/generations',
+          'input',
+          withDefs({
+            ImageSize: { enum: ['1024x1024'] },
+            Usage: usage,
+            Count: { type: 'integer' },
+          }),
+        ),
+        version(
+          'openai/images/generations',
+          'output',
+          withDefs({
+            ImageSize: { enum: ['1024x1024'] },
+            Usage: usage,
+            Count: { type: 'integer' },
+          }),
+        ),
+        version(
+          'openai/images/generations',
+          'stream',
+          JSON.stringify({
+            oneOf: [{ $ref: '#/$defs/PartialImage' }],
+            $defs: { PartialImage: { type: 'object' } },
+          }),
+        ),
+        // Same names, different content: must not silently share one.
+        version(
+          'openai/images/edits',
+          'input',
+          withDefs({
+            ImageSize: { enum: ['256x256'] },
+            Usage: usage,
+            Count: { type: 'number' },
+          }),
+        ),
+        version(
+          'openai/images/edits',
+          'output',
+          withDefs({
+            ImageSize: { enum: ['1024x1024'] },
+            Usage: usage,
+            Count: { type: 'integer' },
+          }),
+        ),
+      ])
+      .onConflictDoNothing()
+
+    const result = await assembleProviderOpenApi(db, 'openai', {
+      activity: 'image',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const document = result.document
+    const paths = document.paths as Record<string, Record<string, unknown>>
+    expect(Object.keys(paths).sort()).toEqual([
+      '/images/edits',
+      '/images/generations',
+    ])
+    expect(unresolvedRefs(document)).toEqual([])
+    expect(JSON.stringify(document)).not.toContain('$defs')
+
+    const ok = (path: string) =>
+      (
+        paths[path]!.post as {
+          responses: { '200': { content: Record<string, { schema: unknown }> } }
+        }
+      ).responses['200'].content
+    expect(Object.keys(ok('/images/generations'))).toEqual(both)
+    expect(ok('/images/generations')['text/event-stream']?.schema).toEqual({
+      oneOf: [{ $ref: '#/components/schemas/PartialImage' }],
+    })
+    const schemas = (
+      document.components as { schemas: Record<string, unknown> }
+    ).schemas
+    const sizeOf = (path: string, media: string) => {
+      const post = paths[path]!.post as {
+        requestBody: {
+          content: Record<
+            string,
+            { schema: { properties: Record<string, { $ref: string }> } }
+          >
+        }
+      }
+      const ref = post.requestBody.content[media]?.schema.properties.size?.$ref
+      return schemas[ref?.split('/').pop() ?? '']
+    }
+    // Same def name, different content: each operation keeps its own.
+    expect(sizeOf('/images/edits', 'multipart/form-data')).toEqual({
+      enum: ['256x256'],
+    })
+    expect(sizeOf('/images/generations', 'application/json')).toEqual({
+      enum: ['1024x1024'],
+    })
+    // Identical defs share one component: two ImageSize, two Count, one Usage
+    // per distinct Count, one PartialImage.
+    expect(Object.keys(schemas).sort()).toHaveLength(7)
+  })
+
+  it('merges an upstream #stream path key into its base operation', async () => {
+    await db
+      .insert(providers)
+      .values({
+        id: 'mistral',
+        displayName: 'Mistral',
+        specSourceUrl: 'https://example.com/m.json',
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(endpoints)
+      .values([
+        {
+          id: 'mistral/v1/audio/transcriptions',
+          providerId: 'mistral',
+          activity: 'audio',
+          method: 'POST',
+          path: '/v1/audio/transcriptions',
+          requestContentType: 'multipart/form-data',
+        },
+        {
+          id: 'mistral/v1/audio/transcriptions#stream',
+          providerId: 'mistral',
+          activity: 'audio',
+          method: 'POST',
+          path: '/v1/audio/transcriptions#stream',
+          requestContentType: 'multipart/form-data',
+          responseContentTypes: ['text/event-stream'],
+        },
+      ])
+      .onConflictDoNothing()
+    await db
+      .insert(schemaVersions)
+      .values([
+        {
+          id: 'mistral/v1/audio/transcriptions:output',
+          endpointId: 'mistral/v1/audio/transcriptions',
+          kind: 'output',
+          contentHash: 'm'.repeat(64),
+          schema: JSON.stringify(OUTPUT),
+          createdAt: NOW,
+        },
+        {
+          id: 'mistral/v1/audio/transcriptions#stream:output',
+          endpointId: 'mistral/v1/audio/transcriptions#stream',
+          kind: 'output',
+          contentHash: 'n'.repeat(64),
+          schema: JSON.stringify({
+            type: 'object',
+            properties: { delta: { type: 'string' } },
+          }),
+          createdAt: NOW,
+        },
+      ])
+      .onConflictDoNothing()
+    const result = await assembleProviderOpenApi(db, 'mistral')
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const paths = result.document.paths as Record<
+      string,
+      Record<string, unknown>
+    >
+    expect(Object.keys(paths)).toEqual(['/v1/audio/transcriptions'])
+    const content = (
+      paths['/v1/audio/transcriptions']!.post as {
+        responses: { '200': { content: Record<string, unknown> } }
+      }
+    ).responses['200'].content
+    expect(Object.keys(content).sort()).toEqual([
+      'application/json',
+      'text/event-stream',
+    ])
   })
 
   it('refuses OpenAPI assembly for AsyncAPI-flagged FAL models', async () => {

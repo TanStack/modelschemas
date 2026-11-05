@@ -160,15 +160,6 @@ function isEventStreamMedia(mediaType: string): boolean {
 }
 
 /**
- * Path of the SSE twin of an operation that also returns JSON.
- * The fragment is not part of the HTTP request, so a generated client
- * still calls the real path and hey-api still emits an SSE method.
- */
-export function streamOperationPath(path: string): string {
-  return `${path}#stream`
-}
-
-/**
  * Success response body. File-like types are binary. `text/plain` is a
  * string. `text/event-stream` uses `streamSchema` when the list also
  * contains JSON, and never the JSON schema and never a made-up string.
@@ -351,26 +342,16 @@ async function loadEndpoints(
 
 function contentTypesFor(
   endpoint: LoadedEndpoint,
-  part: 'all' | 'body' | 'stream',
+  part: 'all' | 'body',
 ): Array<string> | null {
   const types = endpoint.responseContentTypes
-  if (part === 'stream') return ['text/event-stream']
-  if (part === 'body' && types) {
-    const rest = types.filter((type) => !isEventStreamMedia(type))
-    return rest.length > 0 ? rest : null
-  }
   if (!types) return null
-  if (types.some(isJsonMedia) && endpoint.streamSchema === undefined) {
-    const rest = types.filter((type) => !isEventStreamMedia(type))
-    return rest.length > 0 ? rest : null
-  }
-  return types
-}
-
-function splitsStream(endpoint: LoadedEndpoint): boolean {
-  const types = endpoint.responseContentTypes
-  if (!types || endpoint.streamSchema === undefined) return false
-  return types.some(isJsonMedia) && types.some(isEventStreamMedia)
+  const dropStream =
+    part === 'body' ||
+    (types.some(isJsonMedia) && endpoint.streamSchema === undefined)
+  if (!dropStream) return types
+  const rest = types.filter((type) => !isEventStreamMedia(type))
+  return rest.length > 0 ? rest : null
 }
 
 function buildOperation(
@@ -379,8 +360,6 @@ function buildOperation(
   connect: ProviderConnect,
   modelIds: Array<string>,
   pinnedModel: string | undefined,
-  path: string,
-  part: 'all' | 'body' | 'stream',
 ): Record<string, unknown> {
   const input = applyModelEnum(endpoint.input, modelIds)
   const parameters = [
@@ -391,30 +370,22 @@ function buildOperation(
     ? pinPathParams(parameters, pinnedModel)
     : parameters
   const body = requestMedia(input, endpoint.requestContentType)
-  const schema = part === 'stream' ? endpoint.streamSchema : endpoint.output
-  const media =
-    part === 'stream' || !connect.siblingGet
-      ? responseMedia(
-          schema,
-          contentTypesFor(endpoint, part),
-          endpoint.streamSchema,
-        )
-      : undefined
-  const summary =
-    part === 'stream'
-      ? endpoint.description
-        ? `${endpoint.description} (event stream)`
-        : 'Event stream'
-      : (endpoint.description ?? undefined)
+  const media = connect.siblingGet
+    ? undefined
+    : responseMedia(
+        endpoint.output,
+        contentTypesFor(endpoint, 'all'),
+        endpoint.streamSchema,
+      )
   return {
-    operationId: operationId(providerId, 'post', path),
-    summary,
+    operationId: operationId(providerId, 'post', endpoint.path),
+    summary: endpoint.description ?? undefined,
     'x-modelschemas-activity': endpoint.activity,
     ...(pinned.length > 0 ? { parameters: pinned } : {}),
     ...(body ? { requestBody: { required: true, ...body } } : {}),
     responses: {
       '200': {
-        description: part === 'stream' ? 'Event stream' : 'Success',
+        description: 'Success',
         ...media,
       },
     },
@@ -668,6 +639,243 @@ function buildQueueDocument(
   return { paths, schemas }
 }
 
+/** Add `extra`'s 200 media types that `base` lacks; `base` wins otherwise. */
+function mergeSuccessContent(
+  base: Record<string, unknown>,
+  extra: Record<string, unknown>,
+): Record<string, unknown> {
+  const success = (operation: Record<string, unknown>) => {
+    const responses = operation.responses
+    const ok = isObject(responses) ? responses['200'] : undefined
+    return isObject(ok) ? ok : {}
+  }
+  const baseOk = success(base)
+  const extraContent = success(extra).content
+  if (!isObject(extraContent)) return base
+  const baseContent = isObject(baseOk.content) ? baseOk.content : {}
+  return {
+    ...base,
+    responses: {
+      ...(isObject(base.responses) ? base.responses : {}),
+      '200': {
+        ...baseOk,
+        content: { ...extraContent, ...baseContent },
+      },
+    },
+  }
+}
+
+const DEFS_REF = '#/$defs/'
+const COMPONENT_REF = '#/components/schemas/'
+
+/** FNV-1a, 8 hex chars: a stable name suffix, not a security hash. */
+function shortHash(text: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+/** Component keys allow letters, digits, `.`, `_`, and `-`. */
+function componentName(name: string): string {
+  return name.replace(/[^A-Za-z0-9._-]+/g, '_') || '_'
+}
+
+function decodePointerToken(token: string): string {
+  return token.replace(/~1/g, '/').replace(/~0/g, '~')
+}
+
+function hasRootRef(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(hasRootRef)
+  if (!isObject(node)) return false
+  return Object.entries(node).some(([key, value]) =>
+    key === '$ref' ? value === '#' : hasRootRef(value),
+  )
+}
+
+/** `#/$defs/X…` → `#/components/schemas/<names[X]>…`, or undefined. */
+function mapDefRef(
+  value: string,
+  names: Map<string, string>,
+): string | undefined {
+  // Discriminator mappings keep upstream's `#/components/schemas/X` form.
+  const prefix = [DEFS_REF, COMPONENT_REF].find((p) => value.startsWith(p))
+  if (prefix === undefined) return undefined
+  const rest = value.slice(prefix.length)
+  const slash = rest.indexOf('/')
+  const token = slash === -1 ? rest : rest.slice(0, slash)
+  const mapped = names.get(decodePointerToken(token))
+  if (mapped === undefined) return undefined
+  return COMPONENT_REF + mapped + (slash === -1 ? '' : rest.slice(slash))
+}
+
+/**
+ * Point `$ref`s and discriminator mappings at the hoisted components;
+ * `$ref: '#'` → `self`.
+ */
+function rewriteDefRefs(
+  node: unknown,
+  names: Map<string, string>,
+  self: string | undefined,
+): unknown {
+  if (Array.isArray(node)) {
+    return node.map((value) => rewriteDefRefs(value, names, self))
+  }
+  if (!isObject(node)) return node
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(node)) {
+    if (key === '$ref' && typeof value === 'string') {
+      if (value === '#' && self !== undefined) {
+        out[key] = COMPONENT_REF + self
+        continue
+      }
+      if (value.startsWith(DEFS_REF)) {
+        const mapped = mapDefRef(value, names)
+        if (mapped !== undefined) {
+          out[key] = mapped
+          continue
+        }
+      }
+    }
+    if (key === 'discriminator' && isObject(value) && isObject(value.mapping)) {
+      const mapping: Record<string, unknown> = {}
+      for (const [tag, target] of Object.entries(value.mapping)) {
+        mapping[tag] =
+          typeof target === 'string'
+            ? (mapDefRef(target, names) ?? target)
+            : target
+      }
+      out[key] = { ...value, mapping }
+      continue
+    }
+    out[key] = rewriteDefRefs(value, names, self)
+  }
+  return out
+}
+
+/**
+ * Lift one stored schema's `$defs` into `components` and point its refs
+ * there: inside an OpenAPI document `#` is the document root, so a bare
+ * `#/$defs/X` never resolves. Identical definitions share one component.
+ * A name already taken by different content gets a suffix hashed from
+ * this schema's `$defs` and which of them were renamed, so each schema
+ * keeps its own definition.
+ * `self` names the component this schema itself becomes (for `$ref: '#'`).
+ */
+function hoistRoot(
+  schema: unknown,
+  components: Record<string, unknown>,
+  seen: Map<string, string>,
+  self?: string,
+): unknown {
+  if (!isObject(schema)) return schema
+  const defs = isObject(schema.$defs) ? schema.$defs : {}
+  const selfRef = hasRootRef(schema)
+  if (Object.keys(defs).length === 0 && !selfRef) return schema
+  const { $defs: _defs, ...root } = schema
+  const defsText = JSON.stringify(defs)
+  const rootName =
+    self ??
+    (selfRef ? `Schema_${shortHash(JSON.stringify(schema))}` : undefined)
+  const encoded = (name: string): string => {
+    const cached = seen.get(name)
+    if (cached !== undefined) return cached
+    const text = JSON.stringify(components[name])
+    seen.set(name, text)
+    return text
+  }
+  const renamed = new Set<string>()
+  for (;;) {
+    // The suffix covers everything the renamed content depends on, so the
+    // same name always means the same content.
+    const base = JSON.stringify([defsText, [...renamed].sort(), rootName])
+    const names = new Map(
+      Object.keys(defs).map((key) => [
+        key,
+        renamed.has(key)
+          ? `${componentName(key)}_${shortHash(`${key}\0${base}`)}`
+          : componentName(key),
+      ]),
+    )
+    const placed = new Map<string, { text: string; value: unknown }>()
+    const clashes: Array<string> = []
+    for (const [key, def] of Object.entries(defs)) {
+      const name = names.get(key) ?? componentName(key)
+      const value = rewriteDefRefs(def, names, rootName)
+      const text = JSON.stringify(value)
+      const local = placed.get(name)
+      const taken =
+        local !== undefined
+          ? local.text
+          : components[name] !== undefined
+            ? encoded(name)
+            : undefined
+      if (taken !== undefined && taken !== text) {
+        if (renamed.has(key)) {
+          throw new Error(
+            `component schema '${name}' is defined twice with different content`,
+          )
+        }
+        clashes.push(key)
+        continue
+      }
+      placed.set(name, { text, value })
+    }
+    if (clashes.length > 0) {
+      for (const key of clashes) renamed.add(key)
+      continue
+    }
+    for (const [name, entry] of placed) {
+      if (components[name] === undefined) {
+        components[name] = entry.value
+        seen.set(name, entry.text)
+      }
+    }
+    const body = rewriteDefRefs(root, names, rootName)
+    if (rootName === undefined || self !== undefined) return body
+    components[rootName] = body
+    return { $ref: COMPONENT_REF + rootName }
+  }
+}
+
+/**
+ * Every schema slot in `paths` (request and response bodies) and every
+ * given component, with `$defs` hoisted into the returned
+ * `components.schemas`. Mutates `paths` in place.
+ */
+export function hoistSchemaDefs(
+  paths: Record<string, Record<string, unknown>>,
+  initial: Record<string, unknown>,
+): Record<string, unknown> {
+  const components: Record<string, unknown> = { ...initial }
+  const seen = new Map<string, string>()
+  for (const [name, schema] of Object.entries(initial)) {
+    components[name] = hoistRoot(schema, components, seen, name)
+    seen.delete(name)
+  }
+  const hoistContent = (holder: unknown) => {
+    if (!isObject(holder) || !isObject(holder.content)) return
+    for (const media of Object.values(holder.content)) {
+      if (isObject(media) && 'schema' in media) {
+        media.schema = hoistRoot(media.schema, components, seen)
+      }
+    }
+  }
+  for (const item of Object.values(paths)) {
+    for (const operation of Object.values(item)) {
+      if (!isObject(operation)) continue
+      hoistContent(operation.requestBody)
+      if (!isObject(operation.responses)) continue
+      for (const response of Object.values(operation.responses)) {
+        hoistContent(response)
+      }
+    }
+  }
+  return components
+}
+
 export function operationsFor(
   providerId: string,
   endpoint: LoadedEndpoint,
@@ -679,7 +887,6 @@ export function operationsFor(
   method: 'post' | 'get'
   operation: Record<string, unknown>
 }> {
-  const split = splitsStream(endpoint)
   const operations: Array<{
     path: string
     method: 'post' | 'get'
@@ -694,27 +901,9 @@ export function operationsFor(
         connect,
         modelIds,
         pinnedModel,
-        endpoint.path,
-        split ? 'body' : 'all',
       ),
     },
   ]
-  if (split) {
-    const path = streamOperationPath(endpoint.path)
-    operations.push({
-      path,
-      method: 'post',
-      operation: buildOperation(
-        providerId,
-        endpoint,
-        connect,
-        modelIds,
-        pinnedModel,
-        path,
-        'stream',
-      ),
-    })
-  }
   if (connect.siblingGet) {
     operations.push({
       path: siblingRequestPath(endpoint.path),
@@ -897,16 +1086,25 @@ export async function assembleProviderOpenApi(
             activity,
           })
         ).models.map((m) => m.rawId)
-    for (const endpoint of selected) {
+    // An upstream `#stream` path key (Mistral) is the same URL: its media
+    // types join the base operation's 200, after the base is built.
+    const ordered = [...selected].sort(
+      (a, b) => Number(a.path.includes('#')) - Number(b.path.includes('#')),
+    )
+    for (const endpoint of ordered) {
+      const path = endpoint.path.split('#')[0] ?? endpoint.path
       for (const op of operationsFor(
         providerId,
-        endpoint,
+        { ...endpoint, path },
         connect,
         modelIds,
         pinnedModel,
       )) {
         const item = paths[op.path] ?? {}
-        item[op.method] = op.operation
+        const existing = item[op.method]
+        item[op.method] = isObject(existing)
+          ? mergeSuccessContent(existing, op.operation)
+          : op.operation
         paths[op.path] = item
       }
     }
@@ -918,9 +1116,18 @@ export async function assembleProviderOpenApi(
   if (Object.keys(connect.securitySchemes).length > 0) {
     components.securitySchemes = connect.securitySchemes
   }
-  if (queueSchemas && Object.keys(queueSchemas).length > 0) {
-    components.schemas = queueSchemas
+  let schemas: Record<string, unknown>
+  try {
+    schemas = hoistSchemaDefs(paths, queueSchemas ?? {})
+  } catch (error) {
+    return {
+      ok: false,
+      status: 500,
+      code: 'schema_name_conflict',
+      message: `Could not assemble '${providerId}': ${error instanceof Error ? error.message : String(error)}. Use GET /v1/schemas/${providerId} for each endpoint's own schema.`,
+    }
   }
+  if (Object.keys(schemas).length > 0) components.schemas = schemas
   const document: Record<string, unknown> = {
     openapi: '3.1.0',
     info: {

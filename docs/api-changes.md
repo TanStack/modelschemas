@@ -4,6 +4,12 @@ Non-additive changes to the catalog and estimate API. Package release
 steps stay in the README under "Releasing on npm". npm package changelogs
 are written by changesets.
 
+**Breaking:** `GET /v1/openapi/{provider}` has no `{path}#stream`
+operations. JSON and `text/event-stream` share one operation's `200`, and
+schemas live in `components.schemas` (every `$ref` resolves). hey-api
+clients lose typed streaming until hey-api/hey-api#4482 is fixed (README,
+"Generation OpenAPI").
+
 **Breaking (0.1.x):** `capabilities` is a map of booleans, not a list of
 flag names: `["tools", "reasoning"]` is now `{ "tools": true, "reasoning":
 true }`, and a flag the provider states the model does not support is
