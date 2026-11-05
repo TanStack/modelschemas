@@ -1,5 +1,15 @@
 # @modelschemas/client
 
+## 0.3.0
+
+### Minor Changes
+
+- 64fba2b: `GET /v1/openapi/fal` with no selector is one queue document: `POST /{endpoint_id}` and `GET /{endpoint_id}/requests/{request_id}`, with every live model in the `endpoint_id` enum and untyped bodies. `?activity=` narrows the enum and inlines each model's own body schema. Adds `GET /v1/providers/{provider}`: one provider's status, counts, and live model counts per activity.
+
+### Patch Changes
+
+- 57f76fc: `GET /v1/openapi/{provider}` no longer caps a provider-grained document at 40 paths (#560). ElevenLabs is served again, and the whole `music-generation` tag is classified.
+
 ## 0.2.2
 
 ### Patch Changes
