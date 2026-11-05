@@ -3,9 +3,10 @@ import { defineConfig } from 'drizzle-kit'
 
 config({ path: ['.env.local', '.env'] })
 
-// The d1-http driver targets the *remote* D1 database (db:push, db:studio);
-// the credentials are only required for those commands. Local development
-// applies generated migrations to wrangler's local D1 instead:
+// The d1-http driver targets the *remote* D1 database; only db:studio
+// needs the credentials. Schema changes go through generated migrations
+// that wrangler applies (never `drizzle-kit push`, which skips
+// d1_migrations):
 //   bun run db:generate && bun run db:migrate
 export default defineConfig({
   out: './drizzle',
