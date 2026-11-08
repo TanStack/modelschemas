@@ -9,22 +9,35 @@ const originalFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = originalFetch
 })
-it('sources exact native audio budget mode and disable semantics without bounds guesses', () => {
+it('binds the Model comparison thinkingBudget column to its linked native audio id', () => {
+  // The guide no longer says thinking can be disabled: mandatory is unstated.
   expect(parseGeminiNativeAudioThinking(docs.markdown)).toEqual({
     rawId: 'gemini-2.5-flash-native-audio-preview-12-2025',
-    reasoning: { mode: 'budget', mandatory: false },
+    reasoning: { mode: 'budget', mandatory: null },
   })
   expect(() =>
     parseGeminiNativeAudioThinking('```\n' + docs.markdown + '\n```'),
   ).toThrow()
+})
+it('throws when the thinkingBudget column is not exactly one native audio model', () => {
+  // A second column that also uses thinkingBudget is ambiguous.
   expect(() =>
     parseGeminiNativeAudioThinking(
       docs.markdown.replace(
-        'You can disable thinking by setting',
-        'You cannot disable thinking by setting',
+        'Uses `thinkingLevel` (`minimal`',
+        'Uses `thinkingBudget` (`minimal`',
       ),
     ),
-  ).toThrow()
+  ).toThrow('unreadable')
+  // The column's name must link a native audio model page.
+  expect(() =>
+    parseGeminiNativeAudioThinking(
+      docs.markdown.replace(
+        '/docs/models/gemini-2.5-flash-native-audio-preview-12-2025',
+        '/docs/models/gemini-2.5-flash',
+      ),
+    ),
+  ).toThrow('unreadable')
 })
 it('uses model names only to select own guide; exact binding excludes latest aliases', async () => {
   globalThis.fetch = async () => new Response(docs.markdown)
@@ -41,18 +54,4 @@ it('fails clearly when the native source cannot be read', async () => {
       'gemini-2.5-flash-native-audio-preview-12-2025',
     ]),
   ).rejects.toThrow('503')
-})
-
-it('rejects positive instruction text embedded in negated prose', () => {
-  for (const phrase of [
-    'The latest native audio output model',
-    'The `thinkingBudget` parameter guides',
-    'You can disable thinking by setting',
-  ]) {
-    expect(() =>
-      parseGeminiNativeAudioThinking(
-        docs.markdown.replace(phrase, 'Do not assume ' + phrase),
-      ),
-    ).toThrow()
-  }
 })

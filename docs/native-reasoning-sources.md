@@ -65,12 +65,17 @@ covered by a blanket effort exemption.
 
 ## Gemini
 
-- https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash.md.txt — native
+- https://aistudio.google.com/docs/models/gemini-3.8-flash.md — native
   Thinking Supported cell explicitly lists low, medium, high. Minimal is rejected.
-- https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — scoped
+- https://aistudio.google.com/docs/thinking.md?generate-content=true — scoped
   family controls and budget/effort values.
-- https://ai.google.dev/gemini-api/docs/models.md.txt — native model/document index
+- https://aistudio.google.com/docs/models.md — native model/document index
   and explanation that latest aliases are hot-swapped.
+- https://aistudio.google.com/docs/live-api/capabilities.md — the Model
+  comparison table's Thinking row: the one column that "Uses `thinkingBudget`"
+  is the native audio model its name links. Mandatory is unstated.
+
+These pages are Markdoc since #568; `markdocTables` reads their tables.
 
 A native model-page capability or explicit level declaration does not depend on
 the Models API including its optional thinking flag. An explicit API

@@ -4,6 +4,7 @@ import {
   attachGeminiPublishedFacts,
   parseAutomaticRoutes,
   parseChangelogAliases,
+  htmlTables,
   parseGemmaModalities,
 } from './gemini-bindings.ts'
 import type { GeminiPublishedBindings } from './gemini-bindings.ts'
@@ -62,12 +63,12 @@ function bindings(
   return {
     aliases: {},
     changelog: {
-      url: 'https://ai.google.dev/gemini-api/docs/changelog.md.txt',
+      url: 'https://aistudio.google.com/docs/changelog.md',
       hash: 'changelog',
     },
     gemma: {},
     gemmaSource: {
-      url: 'https://ai.google.dev/gemma/docs/core/model_card_4.md.txt',
+      url: 'https://ai.google.dev/gemma/docs/core/model_card_4',
       hash: 'gemma',
     },
     docsFailures: { failed: 0, skipped: 0, first: [] },
@@ -124,6 +125,16 @@ Requests to \`gemini-2.0-flash\` are shut down. The recommended replacement is \
     expect(modalities.has('gemma-4-4b-it')).toBe(false)
   })
 
+  it('reads the Gemma card served as HTML (#568)', () => {
+    const html = `<p>Gemma 4 models, generating text output.</p>
+<table><thead><tr><th style="text-align: left">Property</th><th>E2B</th><th>31B Dense</th></tr></thead>
+<tbody><tr><td><strong>Supported Modalities</strong></td><td>Text, Image, Audio</td><td>Text, Image</td></tr></tbody></table>`
+    const modalities = parseGemmaModalities(htmlTables(html))
+    expect([...modalities]).toEqual([
+      ['gemma-4-31b-it', { input: ['text', 'image'], output: ['text'] }],
+    ])
+  })
+
   it('returns no Gemma modalities when the card has no such row', () => {
     expect(
       parseGemmaModalities('Gemma 4 models, generating text output.\n').size,
@@ -153,7 +164,7 @@ Requests to \`gemini-2.0-flash\` are shut down. The recommended replacement is \
             modalities: {
               derivation: 'docs-derived' as const,
               sourceUrl:
-                'https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash.md.txt',
+                'https://aistudio.google.com/docs/models/gemini-3.5-flash.md',
               sourceHash: 'page',
               path: 'Supported data types',
             },
@@ -167,7 +178,7 @@ Requests to \`gemini-2.0-flash\` are shut down. The recommended replacement is \
             modalities: {
               derivation: 'docs-derived' as const,
               sourceUrl:
-                'https://ai.google.dev/gemini-api/docs/models/gemini-3-pro-preview.md.txt',
+                'https://aistudio.google.com/docs/models/gemini-3-pro-preview.md',
               path: 'Supported data types',
             },
           },
@@ -190,8 +201,7 @@ Requests to \`gemini-2.0-flash\` are shut down. The recommended replacement is \
     expect(flash?.modalities).toEqual(modalities)
     expect(flash?.factSources?.modalities).toEqual({
       derivation: 'docs-derived',
-      sourceUrl:
-        'https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash.md.txt',
+      sourceUrl: 'https://aistudio.google.com/docs/models/gemini-3.5-flash.md',
       sourceHash: 'page',
       path: 'Supported data types; alias of gemini-3.5-flash',
     })

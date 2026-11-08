@@ -105,6 +105,74 @@ export function markdownTableRows(text: string): Array<Array<string>> {
   return rows
 }
 
+/** Text of one Markdoc table cell, its lines already de-indented. */
+function markdocCell(lines: Array<string>): string {
+  let out = ''
+  for (const line of lines) {
+    if (line.trim() === '') {
+      // A paragraph break inside a cell reads as one space.
+      if (out !== '' && !out.endsWith(' ') && !out.endsWith('<br>')) out += ' '
+      continue
+    }
+    // Two trailing spaces, or a trailing backslash, are a hard line break:
+    // one price per line.
+    const hard = /( {2,}|\\+\s*)$/.test(line)
+    const text = line.replace(/\s*\\+\s*$/, '').trim()
+    out += `${out === '' || out.endsWith(' ') || out.endsWith('<br>') ? '' : ' '}${text}`
+    if (hard) out += '<br>'
+  }
+  return (
+    out
+      .replace(/(?:<br>\s*)+$/, '')
+      // Footnote markers are not part of the value.
+      .replace(/\{%\s*sup\s*%\}[\s\S]*?\{%\s*\/sup\s*%\}/g, '')
+      // `label=Supported (low, medium, high)` is the badge's whole text.
+      .replace(/\{%\s*badge\s+label=("?)(.*?)\1\s+type="[^"]*"\s*\/%\}/g, '$2')
+      .replace(/\{%\s*badge type="supported"\s*\/%\}/g, 'Supported')
+      .replace(/\{%\s*badge type="not-supported"\s*\/%\}/g, 'Not supported')
+      .replace(/\{%[\s\S]*?%\}/g, '')
+      // `[**Name**](url)` reads as the `**[Name](url)**` older pages used.
+      .replace(/\[\*\*([^\]*]+)\*\*\]\(([^)]*)\)/g, '**[$1]($2)**')
+      .replace(/\|/g, '/')
+      .replace(/\s+/g, ' ')
+      .trim()
+  )
+}
+
+/**
+ * Rewrites every Markdoc `{% table %}` block (the aistudio.google.com docs
+ * format) as `| a | b |` rows, one line per row, so `markdownTableRows` and
+ * line-based parsers read it. Rows are split by `---`; a cell is a `* `
+ * item at the row's own indent, and a deeper `* ` stays inside its cell.
+ * A hard line break inside a cell becomes `<br>`. Everything outside the
+ * tables is left as it is.
+ */
+export function markdocTables(text: string): string {
+  return text.replace(
+    /^[ \t]*\{%\s*table\b[^%]*%\}[ \t]*\n([\s\S]*?)^[ \t]*\{%\s*\/table\s*%\}[ \t]*$/gm,
+    (_block, body: string) =>
+      body
+        .split(/^[ \t]*---[ \t]*$/m)
+        .map((row) => {
+          const lines = row.split('\n')
+          const indent = lines.find((line) => /^\s*\* /.test(line))
+          if (indent === undefined) return null
+          const marker = indent.slice(0, indent.indexOf('*'))
+          const cells: Array<Array<string>> = []
+          for (const line of lines) {
+            if (line.startsWith(`${marker}* `) || line === `${marker}*`) {
+              cells.push([line.slice(marker.length + 1)])
+            } else {
+              cells.at(-1)?.push(line)
+            }
+          }
+          return `| ${cells.map(markdocCell).join(' | ')} |`
+        })
+        .filter((row) => row !== null)
+        .join('\n'),
+  )
+}
+
 /**
  * One `## <heading>` section of a markdown document, up to the next `## `.
  * Empty when the heading is absent.

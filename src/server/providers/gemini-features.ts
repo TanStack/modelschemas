@@ -5,8 +5,11 @@ import {
 /**
  * Gemini thinking configuration and Google-hosted tools (issue #77).
  *
- * Tools: every model page (`/gemini-api/docs/models/{slug}.md.txt`) has a
- * Capabilities row of `**[Name](url)** Supported|Not supported` pairs.
+ * Pages are aistudio.google.com Markdoc (issue #568); `markdocTables`
+ * rewrites their tables as the `| a | b |` rows these parsers read.
+ *
+ * Tools: every model page (`/docs/models/{slug}.md`) has a Capabilities
+ * row of `**[Name](url)** Supported|Not supported` pairs.
  * Thinking: the generateContent thinking page has a `thinkingLevel` table
  * whose columns name Gemini 3 families, and a `thinkingBudget` table whose
  * rows name Gemini 2.5 families. Both key by family, so an id resolves to
@@ -23,6 +26,7 @@ import {
   docsReport,
   docsRun,
   mapConcurrent,
+  markdocTables,
   markdownTableRows,
   tryDocs,
   unavailable,
@@ -39,10 +43,11 @@ import type {
 } from './types.ts'
 
 export const GEMINI_MODELS_INDEX_URL =
-  'https://ai.google.dev/gemini-api/docs/models.md.txt'
-const GEMINI_MODEL_PAGE_BASE = 'https://ai.google.dev/gemini-api/docs/models/'
+  'https://aistudio.google.com/docs/models.md'
+const GEMINI_DOCS_ORIGIN = 'https://aistudio.google.com'
+const GEMINI_MODEL_PAGE_BASE = `${GEMINI_DOCS_ORIGIN}/docs/models/`
 export const GEMINI_THINKING_URL =
-  'https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt'
+  'https://aistudio.google.com/docs/thinking.md?generate-content=true'
 
 /** Capabilities entry → generateContent `Tool` field. */
 const TOOL_FIELDS: Record<string, string> = {
@@ -196,9 +201,8 @@ function effortMandatory(
 }
 
 /** Family id → reasoning, from both thinking tables. */
-export function parseThinkingPage(
-  markdown: string,
-): Map<string, ModelReasoning> {
+export function parseThinkingPage(page: string): Map<string, ModelReasoning> {
+  const markdown = markdocTables(page)
   const out = new Map<string, ModelReasoning>()
   const named = mandatoryEffortFamilies(markdown)
   const rows = markdownTableRows(markdown)
@@ -273,7 +277,7 @@ export function parseThinkingBudgets(
   markdown: string,
 ): Map<string, GeminiBudgetBody> {
   const out = new Map<string, GeminiBudgetBody>()
-  for (const row of markdownTableRows(markdown)) {
+  for (const row of markdownTableRows(markdocTables(markdown))) {
     const [model = '', , range, disable, dynamic] = row
     if (!/^\*\*[\d.]+ /.test(model) || !range?.includes('`')) continue
     const on = budgetNumber(dynamic)
@@ -293,8 +297,8 @@ const EFFORT_WORDS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
  * true only when the paragraph that lists the levels says thinking cannot
  * be turned off.
  */
-export function parsePageThinking(markdown: string): ModelReasoning | null {
-  const prose = markdown.replace(/```[\s\S]*?```/g, '')
+export function parsePageThinking(page: string): ModelReasoning | null {
+  const prose = markdocTables(page).replace(/```[\s\S]*?```/g, '')
   const sets: Array<Array<string>> = []
   let mandatory: boolean | null = null
   const cell = prose.match(
@@ -357,16 +361,19 @@ export interface GeminiIndexDoc {
 }
 
 function cleanDocUrl(raw: string): string {
-  return raw.replace(/\.md\.txt$/, '').replace(/[),.;]+$/, '')
+  return `${GEMINI_DOCS_ORIGIN}${raw.replace(/[),.;]+$/, '').replace(/\.md$/, '')}`
 }
 
-/** Models index: each docs URL, plus endpoint ids from table rows only. */
+/**
+ * Models index: each `/docs/…` link (relative, as the page writes them),
+ * plus endpoint ids from table rows only.
+ */
 export function parseModelIndexDocs(markdown: string): Array<GeminiIndexDoc> {
   const byUrl = new Map<string, Set<string>>()
-  for (const line of markdown.split('\n')) {
+  for (const line of markdocTables(markdown).split('\n')) {
     const urls = [
       ...line.matchAll(
-        /https:\/\/ai\.google\.dev\/gemini-api\/docs\/[a-z0-9./_-]+/g,
+        /(?<=[("]|https:\/\/aistudio\.google\.com)\/docs\/[a-z0-9._/-]+/g,
       ),
     ]
     if (urls.length === 0) continue
@@ -382,7 +389,7 @@ export function parseModelIndexDocs(markdown: string): Array<GeminiIndexDoc> {
 }
 
 function modelSlug(url: string): string | null {
-  return url.match(/\/models\/([a-z0-9.-]+?)(?:\.md\.txt)?$/)?.[1] ?? null
+  return url.match(/\/models\/([a-z0-9.-]+?)(?:\.md)?$/)?.[1] ?? null
 }
 
 export function parseModelIndex(markdown: string): Array<string> {
@@ -410,7 +417,9 @@ function labeledIds(chunk: string, label: string): Array<string> {
   const ids: Array<string> = []
   for (const line of chunk.split('\n')) {
     if (!line.startsWith(`| ${label} |`)) continue
-    ids.push(...backtickIds(line))
+    // "(… automatically routed to `gemini-3.5-flash-lite`)" names another
+    // model, not a version of this one.
+    ids.push(...backtickIds(line.replace(/\([^)]*\)/g, '')))
   }
   return [...new Set(ids)]
 }
@@ -440,7 +449,8 @@ function sectionFrom(chunk: string): GeminiPageSection {
  * anonymous section, so a property table with no heading still parses.
  * Preamble in front of the first model code is dropped.
  */
-export function parsePageSections(markdown: string): Array<GeminiPageSection> {
+export function parsePageSections(page: string): Array<GeminiPageSection> {
+  const markdown = markdocTables(page)
   const chunks = markdown
     .split(/^(?=#{2,3} )/m)
     .filter((chunk) => /^#{2,3} /.test(chunk))
@@ -498,7 +508,7 @@ interface BoundSection {
 }
 
 function pageUrl(url: string): string {
-  return `${url.replace(/\.md\.txt$/, '')}.md.txt`
+  return `${url.replace(/\.md$/, '')}.md`
 }
 
 function docMatches(rawId: string, doc: GeminiIndexDoc): boolean {
@@ -530,8 +540,9 @@ export async function geminiModelFeatures(
   const [index, thinking, nativeAudio] = await Promise.all([
     tryDocs(run, GEMINI_MODELS_INDEX_URL, (cached) =>
       cached(kv, GEMINI_MODELS_INDEX_URL, async () => {
-        const markdown = await fetchText(GEMINI_MODELS_INDEX_URL)
-        const parsed = parseModelIndexDocs(markdown)
+        const parsed = parseModelIndexDocs(
+          await fetchText(GEMINI_MODELS_INDEX_URL),
+        )
         if (!parsed.some((doc) => modelSlug(doc.url))) {
           throw new Error('gemini models index: 0 slugs')
         }
@@ -550,8 +561,13 @@ export async function geminiModelFeatures(
         }
       }),
     ),
-    geminiNativeAudioThinking(rawIds, kv),
+    tryDocs(run, GEMINI_LIVE_GUIDE_URL, (cached) =>
+      geminiNativeAudioThinking(rawIds, kv, cached),
+    ),
   ])
+  // Null is also "no native audio id listed"; only a listed one can fail.
+  const nativeAudioFailed =
+    nativeAudio === null && rawIds.some((id) => id.includes('native-audio'))
   const indexDocs = index ?? []
   const thinkingDoc = thinking ?? {
     reasoning: {},
@@ -641,15 +657,19 @@ export async function geminiModelFeatures(
     return slug ? bySlug.get(slug) : undefined
   }
   const keepFailedDocs = (
+    rawId: string,
     result: GeminiFeatures,
     modelThinks: boolean | undefined,
   ): GeminiFeatures => {
     const facts: Array<ModelFact> = []
     if (!index) facts.push('serverTools', 'modalities')
-    // The thinking page failed and no model page stated a replacement.
-    // `false` from the listing is the API saying this model does not think.
+    // The thinking page (or, for a native audio id, the live guide) failed
+    // and no model page stated a replacement. `false` from the listing is
+    // the API saying this model does not think.
+    const sourceFailed =
+      !thinking || (nativeAudioFailed && rawId.includes('native-audio'))
     if (
-      !thinking &&
+      sourceFailed &&
       modelThinks !== false &&
       result.reasoning == null &&
       result.absent?.reasoning !== 'unavailable'
@@ -667,7 +687,7 @@ export async function geminiModelFeatures(
     rawId: string,
     modelThinks: boolean | undefined,
   ): GeminiFeatures =>
-    keepFailedDocs(readFeatures(rawId, modelThinks), modelThinks)
+    keepFailedDocs(rawId, readFeatures(rawId, modelThinks), modelThinks)
   const readFeatures = (
     rawId: string,
     modelThinks: boolean | undefined,
@@ -701,7 +721,7 @@ export async function geminiModelFeatures(
         derivation: 'docs-derived',
         sourceUrl: GEMINI_LIVE_GUIDE_URL,
         sourceHash: nativeAudio.hash,
-        path: 'Thinking; exact native audio model; thinkingBudget disables at zero',
+        path: 'Model comparison; Thinking; exact native audio model',
       }
     }
     const failed = docs

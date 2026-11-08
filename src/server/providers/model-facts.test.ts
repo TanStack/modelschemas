@@ -27,6 +27,7 @@ import {
   docsReport,
   docsRun,
   llmsFullPage,
+  markdocTables,
   markdownTableRows,
   tokenCount,
   undatedId,
@@ -49,6 +50,41 @@ describe('model-facts helpers', () => {
     expect(tokenCount('1,048,576')).toBe(1_048_576)
     expect(tokenCount('500k')).toBe(500_000)
     expect(tokenCount('1M')).toBe(1_000_000)
+  })
+
+  it('rewrites Markdoc tables as pipe rows (#568)', () => {
+    const doc = [
+      'Before.',
+      '  {% table %}',
+      '  * Feature',
+      '  * Paid',
+      '',
+      '  ---',
+      '',
+      '  * Input price{% sup %}*{% /sup %}',
+      '  * $2.00 through November 30, 2026.   ',
+      '  $4.00 starting December 1, 2026. \\\\',
+      '  Implicit caching only.',
+      '',
+      '  ---',
+      '',
+      '  *     [**Thinking**](/docs/thinking)',
+      '',
+      '    {% badge label=Supported (low, high) type="supported" /%}',
+      '  *     Read more.',
+      '    *   Stable: `m-1`',
+      '  {% /table %}',
+      'After.',
+    ].join('\n')
+    expect(markdocTables(doc)).toBe(
+      [
+        'Before.',
+        '| Feature | Paid |',
+        '| Input price | $2.00 through November 30, 2026.<br>$4.00 starting December 1, 2026.<br>Implicit caching only. |',
+        '| **[Thinking](/docs/thinking)** Supported (low, high) | Read more. * Stable: `m-1` |',
+        'After.',
+      ].join('\n'),
+    )
   })
 
   it('strips snapshot dates', () => {
@@ -1172,25 +1208,58 @@ describe('grok model prices', () => {
 })
 
 describe('gemini pricing page', () => {
+  /**
+   * `<tr><td>…</td></tr>` rows as the page's Markdoc table: `---` between
+   * rows, one `* ` per cell, `<br>` as a hard line break.
+   */
+  const table = (unit: string, rows: string) => `  {% table %}
+  * Feature
+  * Free Tier
+  * Paid Tier, per ${unit} in USD
+
+  ---
+
+${[...rows.matchAll(/<tr>([\s\S]*?)<\/tr>/g)]
+  .map(([, row = '']) =>
+    [...row.matchAll(/<td>([\s\S]*?)<\/td>/g)]
+      .map(([, cell = '']) => `  * ${cell.split('<br>').join('   \n  ')}`)
+      .join('\n'),
+  )
+  .join('\n\n  ---\n\n')}
+  {% /table %}`
+
+  /** One `## ` section: a Standard tab, then a Batch tab it must ignore. */
   const section = (
     id: string,
     rows: string,
     extraIds: Array<string> = [],
-  ) => `<div class="models-section">
-  <div class="heading-group"><h2 id="${id}">Name</h2>
-  <em>${[id, ...extraIds]
-    .map(
-      (each) =>
-        `<a href="/gemini-api/docs/models/${each}"><code translate="no" dir="ltr">${each}</code></a>`,
-    )
-    .join('')}</em></div>
-  </div>
-  <div><devsite-selector><section><h3 id="standard" data-text="Standard">Standard</h3><table class="pricing-table">
-  <thead><tr><th></th><th scope="col">Free Tier</th><th scope="col">Paid Tier, per 1M tokens in USD</th></tr></thead>
-  <tbody>${rows}</tbody></table></section>
-  <section><h3 id="batch" data-text="Batch">Batch</h3><table class="pricing-table"><tbody>
-  <tr><td>Input price</td><td>Not available</td><td>$0.15</td></tr>
-  </tbody></table></section></devsite-selector></div>`
+  ) => `## Name  {% id="${id}" %}
+
+*${[id, ...extraIds].map((each) => `[\`${each}\`](/docs/models/${each})`).join(' and\n')}*
+
+{% hr /%}
+
+{% tabs %}
+  {% tab title="Standard" %}
+${table('1M tokens', rows)}
+  {% /tab %}
+
+  {% tab title="Batch" %}
+${table('1M tokens', '<tr><td>Input price</td><td>Not available</td><td>$0.15</td></tr>')}
+  {% /tab %}
+{% /tabs %}
+`
+
+  /** A section with no tabs, priced per `unit`. */
+  const untabbed = (ids: Array<string>, unit: string, rows: string) =>
+    `## Name  {% id="${ids[0] ?? ''}" %}
+
+*${ids.map((each) => `[\`${each}\`](/a)`).join(',\n')}*
+
+{% hr /%}
+
+${table(unit, rows)}
+`
 
   const NOW = Date.UTC(2026, 8, 16)
 
@@ -1350,19 +1419,18 @@ describe('gemini pricing page', () => {
   })
 
   it('cards a per-second section, one row per model id', () => {
-    const page = `<div class="models-section">
-  <div class="heading-group"><h2 id="veo-3.1">Veo 3.1</h2>
-  <em><a href="/a"><code translate="no" dir="ltr">veo-3.1-generate-preview</code></a>,
-  <a href="/b"><code translate="no" dir="ltr">veo-3.1-fast-generate-preview</code></a>,
-  <a href="/c"><code translate="no" dir="ltr">veo-3.1-lite-generate-preview</code></a></em></div>
-  </div>
-  <table class="pricing-table"><thead><tr><th></th><th scope="col">Free Tier</th>
-  <th scope="col">Paid Tier, per second in USD</th></tr></thead><tbody>
-  <tr><td>Veo 3.1 Standard video with audio price (default)</td><td>Not available</td><td>$0.40 (720p and 1080p)<br>$0.60 (4k)</td></tr>
+    const page = untabbed(
+      [
+        'veo-3.1-generate-preview',
+        'veo-3.1-fast-generate-preview',
+        'veo-3.1-lite-generate-preview',
+      ],
+      'second',
+      `<tr><td>Veo 3.1 Standard video with audio price (default)</td><td>Not available</td><td>$0.40 (720p and 1080p)<br>$0.60 (4k)</td></tr>
   <tr><td>Veo 3.1 Fast video with audio price (default)</td><td>Not available</td><td>$0.10 (720p)<br>$0.30 (4k)</td></tr>
   <tr><td>Veo 3.1 Lite video with audio price (default)</td><td>Not available</td><td>$0.05 (720p)<br>(4k output not supported)</td></tr>
-  <tr><td>Used to improve our products</td><td>Yes</td><td>No</td></tr>
-  </tbody></table>`
+  <tr><td>Used to improve our products</td><td>Yes</td><td>No</td></tr>`,
+    )
     const rows = parseGeminiPricing(page, Date.UTC(2026, 8, 16))
     expect(rows.get('veo-3.1-generate-preview')?.unit).toEqual({
       // Duration and size sit under the request's untyped `parameters`.
@@ -1387,16 +1455,12 @@ describe('gemini pricing page', () => {
   })
 
   it('cards a per-request section flat', () => {
-    const page = `<div class="models-section">
-  <div class="heading-group"><h2 id="lyria">Lyria</h2>
-  <em><a href="/a"><code translate="no" dir="ltr">lyria-3-clip-preview</code></a>,
-  <a href="/b"><code translate="no" dir="ltr">lyria-3-pro-preview</code></a></em></div>
-  </div>
-  <table class="pricing-table"><thead><tr><th></th><th scope="col">Free Tier</th>
-  <th scope="col">Paid Tier, per request in USD</th></tr></thead><tbody>
-  <tr><td>Lyria 3 Clip Preview (30s)</td><td>Not available</td><td>$0.04 per song</td></tr>
-  <tr><td>Lyria 3 Pro Preview (Full Song)</td><td>Not available</td><td>$0.08 per song</td></tr>
-  </tbody></table>`
+    const page = untabbed(
+      ['lyria-3-clip-preview', 'lyria-3-pro-preview'],
+      'request',
+      `<tr><td>Lyria 3 Clip Preview (30s)</td><td>Not available</td><td>$0.04 per song</td></tr>
+  <tr><td>Lyria 3 Pro Preview (Full Song)</td><td>Not available</td><td>$0.08 per song</td></tr>`,
+    )
     const rows = parseGeminiPricing(page, Date.UTC(2026, 8, 16))
     expect(rows.get('lyria-3-clip-preview')?.unit).toEqual({ rates: 0.04 })
     expect(rows.get('lyria-3-pro-preview')?.unit).toEqual({ rates: 0.08 })

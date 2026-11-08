@@ -19,6 +19,7 @@ import {
   parseThinkingBudgets,
   parseThinkingPage,
 } from './gemini-features.ts'
+import { GEMINI_LIVE_GUIDE_URL } from './gemini-live-thinking.ts'
 import { grokReasoningGap, parseGrokReasoning } from './grok.ts'
 
 describe('anthropic features (issue #77)', () => {
@@ -298,7 +299,7 @@ describe('gemini features (issue #77)', () => {
   })
 
   describe('model pages', () => {
-    const INDEX = 'https://ai.google.dev/gemini-api/docs/models'
+    const INDEX = 'https://aistudio.google.com/docs/models'
     const page = (types: string) =>
       `| Supported data types | ${types} |\n| Capabilities | **[Search grounding](u)** Supported |\n`
     const withPages = async <T>(
@@ -320,9 +321,9 @@ describe('gemini features (issue #77)', () => {
       const extras = options?.extras ?? {}
       globalThis.fetch = ((url: string) => {
         const href = String(url)
-        const slug = href.match(/\/models\/([^/]+)\.md\.txt$/)?.[1]
+        const slug = href.match(/\/models\/([^/]+)\.md$/)?.[1]
         const extra = Object.keys(extras).find((key) => href.endsWith(key))
-        const body = href.endsWith('/thinking.md.txt')
+        const body = href.endsWith('/thinking.md?generate-content=true')
           ? thinkingBody
           : slug && Object.hasOwn(pages, slug)
             ? pages[slug]
@@ -363,7 +364,7 @@ describe('gemini features (issue #77)', () => {
         factSources: {
           modalities: {
             derivation: 'docs-derived',
-            sourceUrl: `${INDEX}/gemini-2.5-flash.md.txt`,
+            sourceUrl: `${INDEX}/gemini-2.5-flash.md`,
             path: 'Supported data types',
           },
         },
@@ -378,7 +379,7 @@ describe('gemini features (issue #77)', () => {
       })
       expect(docsFailures.failed).toBe(1)
       expect(docsFailures.first[0]?.source).toBe(
-        `${INDEX}/gemini-2.5-flash-lite.md.txt`,
+        `${INDEX}/gemini-2.5-flash-lite.md`,
       )
       // No page at all is a plain unknown.
       expect(features('gemma-4-31b-it', false).absent).toBeUndefined()
@@ -403,6 +404,23 @@ describe('gemini features (issue #77)', () => {
           source: GEMINI_MODELS_INDEX_URL,
           error: 'gemini models index: 0 slugs',
         }),
+      ])
+    })
+
+    it('keeps stored native audio reasoning when the live guide fails (#568)', async () => {
+      const id = 'gemini-2.5-flash-native-audio-preview-12-2025'
+      const { features, docsFailures } = await withPages(
+        { [id]: page('**Inputs** Text, audio **Output** Text, audio') },
+        () => geminiModelFeatures([id]),
+        { extras: { '/live-api/capabilities.md': null } },
+      )
+      expect(features(id, true)).toMatchObject({
+        modalities: { input: ['text', 'audio'], output: ['text', 'audio'] },
+        reasoning: null,
+        absent: { reasoning: 'unavailable' },
+      })
+      expect(docsFailures.first).toEqual([
+        expect.objectContaining({ source: GEMINI_LIVE_GUIDE_URL }),
       ])
     })
 
@@ -454,10 +472,10 @@ describe('gemini features (issue #77)', () => {
           ]),
         {
           extras: {
-            '/models/gemini-3.5-flash.md.txt': own('gemini-3.5-flash'),
+            '/models/gemini-3.5-flash.md': own('gemini-3.5-flash'),
             // A page that names another model binds nothing to this id.
-            '/models/gemini-3.7-flash.md.txt': own('gemini-9-flash'),
-            '/models/gemini-flash-latest.md.txt': 404,
+            '/models/gemini-3.7-flash.md': own('gemini-9-flash'),
+            '/models/gemini-flash-latest.md': 404,
           },
         },
       )
@@ -466,7 +484,7 @@ describe('gemini features (issue #77)', () => {
         factSources: {
           serverTools: {
             googleSearch: {
-              sourceUrl: `${INDEX}/gemini-3.5-flash.md.txt`,
+              sourceUrl: `${INDEX}/gemini-3.5-flash.md`,
               path: 'Capabilities',
             },
           },
@@ -532,27 +550,27 @@ describe('gemini features (issue #77)', () => {
 
     it('binds endpoint ids on the models index and version ids on the page', () => {
       const index = [
-        '| [Gemini Omni Flash](https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash) | ``` gemini-omni-1.1-flash ``` |',
-        '| [Gemini 3.1 Pro](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview) | ``` gemini-3.1-pro-preview ``` |',
-        '| [Gemini Robotics ER 2](https://ai.google.dev/gemini-api/docs/robotics-overview) | ``` gemini-robotics-er-2-preview ``` |',
-        'https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash',
+        '| [Gemini Omni Flash](https://aistudio.google.com/docs/models/gemini-omni-flash) | ``` gemini-omni-1.1-flash ``` |',
+        '| [Gemini 3.1 Pro](https://aistudio.google.com/docs/models/gemini-3.1-pro-preview) | ``` gemini-3.1-pro-preview ``` |',
+        '| [Gemini Robotics ER 2](https://aistudio.google.com/docs/robotics-overview) | ``` gemini-robotics-er-2-preview ``` |',
+        'https://aistudio.google.com/docs/models/gemini-2.5-flash',
       ].join('\n')
       const docs = parseModelIndexDocs(index)
       expect(docs).toEqual([
         {
-          url: 'https://ai.google.dev/gemini-api/docs/models/gemini-omni-flash',
+          url: 'https://aistudio.google.com/docs/models/gemini-omni-flash',
           ids: ['gemini-omni-1.1-flash'],
         },
         {
-          url: 'https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview',
+          url: 'https://aistudio.google.com/docs/models/gemini-3.1-pro-preview',
           ids: ['gemini-3.1-pro-preview'],
         },
         {
-          url: 'https://ai.google.dev/gemini-api/docs/robotics-overview',
+          url: 'https://aistudio.google.com/docs/robotics-overview',
           ids: ['gemini-robotics-er-2-preview'],
         },
         {
-          url: 'https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash',
+          url: 'https://aistudio.google.com/docs/models/gemini-2.5-flash',
           ids: [],
         },
       ])
@@ -612,7 +630,7 @@ describe('gemini features (issue #77)', () => {
         },
         {
           index,
-          extras: { '/robotics-overview.md.txt': overview },
+          extras: { '/robotics-overview.md': overview },
         },
       )
     })
@@ -637,7 +655,7 @@ describe('gemini features (issue #77)', () => {
           factSources: {
             reasoning: {
               path: 'thinking level',
-              sourceUrl: `${INDEX}/gemini-nano-banana-2.1.md.txt`,
+              sourceUrl: `${INDEX}/gemini-nano-banana-2.1.md`,
             },
           },
         })
@@ -649,8 +667,8 @@ describe('gemini features (issue #77)', () => {
 
     it('keeps the dedicated model-code page when a versions row repeats the id', async () => {
       const index = [
-        '| [Gemini 3.5 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash) | ``` gemini-3.5-flash ``` |',
-        '| [Gemini 3 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3-flash-preview) | ``` gemini-3-flash-preview ``` |',
+        '| [Gemini 3.5 Flash](https://aistudio.google.com/docs/models/gemini-3.5-flash) | ``` gemini-3.5-flash ``` |',
+        '| [Gemini 3 Flash](https://aistudio.google.com/docs/models/gemini-3-flash-preview) | ``` gemini-3-flash-preview ``` |',
       ].join('\n')
       const flash35 = [
         '## gemini-3.5-flash',
@@ -684,7 +702,7 @@ describe('gemini features (issue #77)', () => {
 
     it('lets a looked-up page repeat a sibling another page states', async () => {
       const index = [
-        '| [Gemini Robotics ER 2](https://ai.google.dev/gemini-api/docs/robotics-overview) | ``` gemini-robotics-er-2-preview ``` |',
+        '| [Gemini Robotics ER 2](https://aistudio.google.com/docs/robotics-overview) | ``` gemini-robotics-er-2-preview ``` |',
         `${INDEX}/gemini-2.5-flash`,
       ].join('\n')
       const section = (id: string, types: string) =>
@@ -719,9 +737,9 @@ describe('gemini features (issue #77)', () => {
         {
           index,
           extras: {
-            '/robotics-overview.md.txt': overview,
-            '/models/gemini-robotics-er-2-streaming-preview.md.txt': streaming,
-            '/models/gemini-robotics-er-1.6-preview.md.txt': 404,
+            '/robotics-overview.md': overview,
+            '/models/gemini-robotics-er-2-streaming-preview.md': streaming,
+            '/models/gemini-robotics-er-1.6-preview.md': 404,
           },
         },
       )
@@ -729,8 +747,7 @@ describe('gemini features (issue #77)', () => {
         modalities: { input: ['text', 'image'], output: ['text'] },
         factSources: {
           modalities: {
-            sourceUrl:
-              'https://ai.google.dev/gemini-api/docs/robotics-overview.md.txt',
+            sourceUrl: 'https://aistudio.google.com/docs/robotics-overview.md',
           },
         },
       })

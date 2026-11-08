@@ -1,9 +1,9 @@
 /**
- * Gemini prices from Google's own pricing page (issue #61). Google
- * publishes no pricing API and no markdown mirror, so this parses the
- * server-rendered page: one `models-section` per price, every model id in
- * the heading group's `<code>` (siblings share the table), and the paid-tier
- * column of the section's "Standard" table.
+ * Gemini prices from Google's own pricing page (issues #61, #568). Google
+ * publishes no pricing API, so this parses the page's Markdoc mirror: one
+ * `## ` section per price, every model id linked in backticks above the
+ * section's first `{% hr /%}` (siblings share the table), and the paid-tier
+ * column of the section's "Standard" tab, or of its only table.
  *
  * Fail-closed: only the token rows (input / output / context caching) are
  * levers, and any priced row, qualifier or unit the parser does not
@@ -28,6 +28,8 @@ import { tagDocsFacts } from './fact-sources.ts'
 import {
   assertParsed,
   docsRun,
+  markdocTables,
+  markdownTableRows,
   parseDay,
   tokenCount,
   tryDocs,
@@ -37,8 +39,7 @@ import { fetchText, sha256Text } from './types.ts'
 import type { DocsRun } from './model-facts.ts'
 import type { ModelInfo } from './types.ts'
 
-export const GEMINI_PRICING_URL =
-  'https://ai.google.dev/gemini-api/docs/pricing'
+export const GEMINI_PRICING_URL = 'https://aistudio.google.com/docs/pricing.md'
 
 /**
  * A row's lever per modality. `default` takes any price the row quotes for
@@ -120,6 +121,9 @@ function plain(html: string): string {
     html
       // Footnote markers are not part of a price.
       .replace(/<sup>[\s\S]*?<\/sup>/g, '')
+      // `[No](/docs/terms)` → `No`.
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\*\*|`/g, '')
       // A real tag only; a bare `<=` in a qualifier must survive.
       .replace(/<\/?[a-zA-Z][^>]*>/g, '')
       .replace(/&([a-z]+|#\d+);/gi, (match, name: string) => {
@@ -249,12 +253,12 @@ interface ParsedRates {
   expiresAt: number | null
 }
 
-function parseTable(segment: string, now: number): ParsedRates | null {
+function parseTable(
+  table: Array<Array<string>>,
+  now: number,
+): ParsedRates | null {
   const out: ParsedRates = { base: {}, tiers: {}, expiresAt: null }
-  for (const [, row = ''] of segment.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
-    const cells = [...row.matchAll(/<td>([\s\S]*?)<\/td>/g)].map(
-      ([, cell = '']) => cell,
-    )
+  for (const cells of table) {
     if (cells.length < 2) continue
     const label = plain(cells[0] ?? '').toLowerCase()
     if (IGNORED_ROWS.test(label)) continue
@@ -305,12 +309,9 @@ interface UnitRow {
  * Rows of a per-unit table. `null` refuses the model: a price this parser
  * cannot key is worse than no card.
  */
-function parseUnitRows(segment: string): Array<UnitRow> | null {
+function parseUnitRows(table: Array<Array<string>>): Array<UnitRow> | null {
   const rows: Array<UnitRow> = []
-  for (const [, row = ''] of segment.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
-    const cells = [...row.matchAll(/<td>([\s\S]*?)<\/td>/g)].map(
-      ([, cell = '']) => cell,
-    )
+  for (const cells of table) {
     if (cells.length < 2) continue
     const label = plain(cells[0] ?? '')
     if (IGNORED_ROWS.test(label.toLowerCase())) continue
@@ -395,15 +396,41 @@ export interface GeminiRates {
   unit?: UnitCardSpec
 }
 
-const SECTION = '<div class="models-section">'
+/** The page's `## ` sections, tables rewritten as `| a | b |` rows. */
+function sections(markdown: string): Array<string> {
+  return markdocTables(markdown)
+    .split(/^(?=## )/m)
+    .filter((chunk) => chunk.startsWith('## '))
+}
 
-/** The heading group's `<em>` lists every id the section prices. */
-function headingIds(chunk: string): Array<string> {
+/** Ids linked in backticks above the section's first `{% hr /%}`. */
+function headingIds(section: string): Array<string> {
+  const end = section.indexOf('{% hr /%}')
+  if (end < 0) return []
   return [
-    ...chunk
-      .slice(0, chunk.indexOf('</em>'))
-      .matchAll(/<code[^>]*>([a-z0-9][a-z0-9.-]+)<\/code>/g),
+    ...section.slice(0, end).matchAll(/\[`([a-z0-9][a-z0-9.-]+)`\]\(/g),
   ].map(([, value = '']) => value)
+}
+
+/**
+ * The section's first table, when it is the Standard rates: Batch, Flex
+ * and Priority are later `{% tab %}`s, and a section with no tabs has one
+ * table.
+ */
+function standardTable(section: string): Array<Array<string>> | null {
+  const lines = section.split('\n')
+  const start = lines.findIndex((line) => line.startsWith('|'))
+  if (start < 0) return null
+  let end = start
+  while (lines[end]?.startsWith('|')) end++
+  const tab = [
+    ...lines
+      .slice(0, start)
+      .join('\n')
+      .matchAll(/\{%\s*tab\b[^%]*title="([^"]*)"/g),
+  ].at(-1)
+  if (tab && tab[1] !== 'Standard') return null
+  return markdownTableRows(lines.slice(start, end).join('\n'))
 }
 
 /**
@@ -413,37 +440,32 @@ function headingIds(chunk: string): Array<string> {
  * deprecations page says API requests are automatically routed to that id
  * (issue #497). A recommended replacement is not a rate (issue #300).
  */
-export function geminiNamedIds(html: string): Array<string> {
-  return [...new Set(html.split(SECTION).slice(1).flatMap(headingIds))]
+export function geminiNamedIds(markdown: string): Array<string> {
+  return [...new Set(sections(markdown).flatMap(headingIds))]
 }
 
 /** Model id → per-token rates parsed from its Standard table. */
 export function parseGeminiPricing(
-  html: string,
+  markdown: string,
   now: number = Date.now(),
 ): Map<string, GeminiRates> {
   const out = new Map<string, GeminiRates>()
-  for (const chunk of html.split(SECTION).slice(1)) {
-    const ids = headingIds(chunk)
-    // The first table of the chunk is the model's own. Its `</table>` can
-    // fall outside the chunk (the last section on the page ends mid-table),
-    // so `</tbody>` closes it too — but one of them must be there, or a
-    // Batch/Flex table further down would be read as Standard rates.
-    const end = ['</tbody>', '</table>']
-      .map((tag) => chunk.indexOf(tag))
-      .filter((at) => at >= 0)
+  for (const section of sections(markdown)) {
+    const ids = headingIds(section)
     // One Standard table covers every id named in the heading
     // (`gemini-3.1-pro-preview` and `gemini-3.1-pro-preview-customtools`).
-    if (ids.length === 0 || end.length === 0) continue
+    if (ids.length === 0) continue
     if (ids.every((each) => out.has(each))) continue
-    const segment = chunk.slice(0, Math.min(...end))
-    // Standard rates only: Batch and Flex are separate `<section>` tabs.
-    const heading = [...segment.matchAll(/<h3[^>]*data-text="([^"]*)"/g)].at(-1)
-    if (heading && heading[1] !== 'Standard') continue
-    const unit = segment.match(/Paid Tier, per ([^<]*?) in USD/)?.[1]?.trim()
+    const table = standardTable(section)
+    if (!table) continue
+    const [header = [], ...body] = table
+    const unit = header
+      .at(-1)
+      ?.match(/^Paid Tier, per (.+?) in USD$/)?.[1]
+      ?.trim()
     if (unit !== undefined && unit !== '1M tokens') {
       if (!(unit in UNIT_QUANTITY)) continue
-      const rows = parseUnitRows(segment)
+      const rows = parseUnitRows(body)
       if (!rows) continue
       const quantity = UNIT_QUANTITY[unit]
       for (const each of ids) {
@@ -474,7 +496,7 @@ export function parseGeminiPricing(
       }
       continue
     }
-    const parsed = parseTable(segment, now)
+    const parsed = parseTable(body, now)
     if (!parsed || Object.keys(parsed.base).length === 0) continue
     const rates: GeminiRates = {
       base: parsed.base,
@@ -511,13 +533,13 @@ export async function geminiModelPricing(
   const [doc, routes] = await Promise.all([
     tryDocs(run, GEMINI_PRICING_URL, (cached) =>
       cached(kv, GEMINI_PRICING_URL, async () => {
-        const html = await fetchText(GEMINI_PRICING_URL)
-        const parsed = parseGeminiPricing(html)
+        const markdown = await fetchText(GEMINI_PRICING_URL)
+        const parsed = parseGeminiPricing(markdown)
         assertParsed(parsed, 'gemini pricing page')
         return {
           rates: Object.fromEntries(parsed),
-          named: geminiNamedIds(html),
-          hash: await sha256Text(html),
+          named: geminiNamedIds(markdown),
+          hash: await sha256Text(markdown),
           extractedAt: new Date().toISOString(),
         }
       }),
