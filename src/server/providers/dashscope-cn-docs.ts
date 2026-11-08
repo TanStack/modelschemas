@@ -365,8 +365,14 @@ export function applyCnTextFacts(models: ModelInfo[], doc: CnDoc): ModelInfo[] {
         const flag = mapped[head[index]!]
         if (!flag) continue
         const value = cnText(row[index]!)
+        // JSON Mode is a response_format yes and says nothing about strict
+        // structured outputs (same split as openai-compat's json_mode).
+        if (flag === 'structured_outputs' && value === '支持（JSON Mode）') {
+          capabilities.push('response_format')
+          continue
+        }
         if (value !== '支持' && value !== '不支持')
-          fail('unknown capability support value')
+          fail(`unknown capability support value: ${value}`)
         if (value === '支持') capabilities.push(flag)
         else unsupportedCapabilities.push(flag)
       }
