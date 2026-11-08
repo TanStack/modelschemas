@@ -14,6 +14,12 @@ import {
 
 const originalFetch = globalThis.fetch
 const docs = fixtures as Record<string, string>
+const SPARK = 'https://dev.meta.ai/docs/muse-spark'
+const WONDER = 'https://dev.meta.ai/docs/muse-wonder'
+const pages = {
+  'muse-spark': docs[SPARK] ?? '',
+  'muse-wonder': docs[WONDER] ?? '',
+}
 function serve(overrides: Record<string, string> = {}) {
   const urls: Array<string> = []
   globalThis.fetch = async (input) => {
@@ -58,7 +64,7 @@ describe('Meta native docs', () => {
       },
       contextWindow: 1048576,
       maxOutput: null,
-      capabilities: ['tools', 'structured_outputs', 'reasoning'],
+      capabilities: ['reasoning', 'tools', 'structured_outputs'],
       providerMetadata: { family: 'Muse Spark', tier: 'Standard' },
       reasoning: {
         mandatory: true,
@@ -180,7 +186,7 @@ describe('Meta native docs', () => {
       required: ['messages', 'model'],
       properties: {
         messages: { type: 'array', minItems: 1 },
-        frequency_penalty: { minimum: -2, maximum: 2 },
+        top_logprobs: { minimum: 0, maximum: 20 },
       },
     })
     expect(schemas['create-chat-completion-response']).toMatchObject({
@@ -248,7 +254,7 @@ describe('Meta native docs', () => {
     )
   })
   it('leaves pricing null when the provider publishes no quote for a newly listed model', () => {
-    const models = parseMetaModels(docs[META_MODELS] ?? '')
+    const models = parseMetaModels(docs[META_MODELS] ?? '', pages)
     models.push({
       rawId: 'synthetic-unsourced',
       providerMetadata: { family: 'Synthetic' },
@@ -272,7 +278,7 @@ describe('Meta native docs', () => {
     ).toThrow('schema field row changed')
   })
   it('rejects malformed published quotes rather than filling old amounts', () => {
-    const models = parseMetaModels(docs[META_MODELS] ?? '')
+    const models = parseMetaModels(docs[META_MODELS] ?? '', pages)
     expect(() =>
       parseMetaPricing(
         (docs[META_PRICING] ?? '').replace('$1.25', '$unknown'),
@@ -289,53 +295,78 @@ describe('Meta native docs', () => {
     ).toThrow('unreadable image price')
   })
   it('fails a models page whose chat tables it cannot read instead of dropping them', async () => {
-    const page = docs[META_MODELS] ?? ''
-    for (const [html, error] of [
+    const models = docs[META_MODELS] ?? ''
+    const spark = docs[SPARK] ?? ''
+    for (const [overrides, error] of [
       [
-        page.replace(
-          '<th>Variant</th><th>Model API (pay-as-you-go)</th>',
-          '<th>Variant</th><th>Model API</th>',
-        ),
+        {
+          [SPARK]: spark.replace(
+            '<th>Version</th><th>Model API (pay-as-you-go)</th>',
+            '<th>Version</th><th>Model API</th>',
+          ),
+        },
         'model availability headers changed',
       ],
       [
-        page.replace('<th>Variant</th>', '<th>Edition</th>'),
-        'chat section listed no models',
+        { [SPARK]: spark.replace('<th>Version</th>', '<th>Edition</th>') },
+        'missing model availability table',
       ],
       [
-        page
-          .replace('<th>Variant</th>', '<th>Edition</th>')
-          .replace('<th>Version</th>', '<th>Release</th>')
-          .replaceAll('-token context window', ' token window'),
+        {
+          [META_MODELS]: models.replace(
+            '<code>muse-spark-1.1</code>',
+            '<code>muse-spark-1.0</code>',
+          ),
+        },
+        'Muse Spark page disagrees with the model table',
+      ],
+      [
+        {
+          [META_MODELS]: models
+            .replaceAll('<th>Context window</th>', '')
+            .replaceAll('<td>1,048,576 tokens</td>', '')
+            .replace(
+              ', <code>muse-spark-1.2</code>, <code>muse-spark-1.1</code>',
+              '',
+            ),
+        },
         'model page listed no chat models',
       ],
       [
-        page.replace('All take text, image', 'All accept text, image'),
+        {
+          [SPARK]: spark.replace(
+            '<td><strong>Input</strong></td>',
+            '<td><strong>Inputs</strong></td>',
+          ),
+        },
         'missing model modalities',
       ],
       [
-        page.replace(
-          'and have a 1,048,576-token context window',
-          'and have a 1,048,576-token context window (1.1: a 262,144-token context window)',
-        ),
+        { [SPARK]: spark.replace('1,048,576 tokens', 'about a million') },
         'unreadable model context',
       ],
       [
-        page.replace('<td>Contributor mode</td>', '<td>Discounted mode</td>'),
+        {
+          [SPARK]: spark.replace(
+            '<td>Contributor mode</td>',
+            '<td>Discounted mode</td>',
+          ),
+        },
         'unreadable model availability',
       ],
     ] as const) {
-      serve({ [META_MODELS]: html })
+      serve(overrides)
       await expect(provider.listModels({})).rejects.toThrow(error)
     }
   })
-  it('reads every output modality the chat prose states', () => {
-    const models = parseMetaModels(
-      (docs[META_MODELS] ?? '').replace(
-        'returns text, has a',
-        'returns text and images, has a',
+  it('reads every output modality the line page states', () => {
+    const models = parseMetaModels(docs[META_MODELS] ?? '', {
+      ...pages,
+      'muse-wonder': pages['muse-wonder'].replace(
+        '<td><strong>Output</strong></td><td>Text</td>',
+        '<td><strong>Output</strong></td><td>Text and images</td>',
       ),
-    )
+    })
     expect(
       models.find((m) => m.rawId === 'muse-wonder-1.0')?.modalities,
     ).toEqual({
@@ -344,7 +375,7 @@ describe('Meta native docs', () => {
     })
   })
   it('fails token prices whose mode is unstated, ambiguous or contradicts the model tier', () => {
-    const models = parseMetaModels(docs[META_MODELS] ?? '')
+    const models = parseMetaModels(docs[META_MODELS] ?? '', pages)
     const page = docs[META_PRICING] ?? ''
     for (const [html, error] of [
       [
@@ -380,7 +411,7 @@ describe('Meta native docs', () => {
       ).toThrow(error)
   })
   it('fails a family price table it does not recognise instead of clearing the price', () => {
-    const models = parseMetaModels(docs[META_MODELS] ?? '')
+    const models = parseMetaModels(docs[META_MODELS] ?? '', pages)
     const page = docs[META_PRICING] ?? ''
     const wonder = page.indexOf('<p>Model: <code>muse-wonder-1.0</code>')
     expect(() =>
@@ -398,7 +429,7 @@ describe('Meta native docs', () => {
     ).toThrow('unknown pricing table')
   })
   it('fails when a pay-as-you-go chat ID gets no token price', () => {
-    const models = parseMetaModels(docs[META_MODELS] ?? '')
+    const models = parseMetaModels(docs[META_MODELS] ?? '', pages)
     expect(() =>
       parseMetaPricing(
         (docs[META_PRICING] ?? '').replace(

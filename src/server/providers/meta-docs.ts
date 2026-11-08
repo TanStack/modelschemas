@@ -72,7 +72,87 @@ const csv = (value: string) =>
 const ID = /[a-z0-9][a-z0-9.-]*[a-z0-9]/g
 export const list = (value: string) =>
   value.split(/,\s*(?:and\s+)?|\s+and\s+/).map((x) => x.trim().toLowerCase())
-export function parseMetaModels(html: string): Array<ModelInfo> {
+const capabilityLinks = (html: string) =>
+  [
+    ...new Set(
+      [
+        ...html.matchAll(
+          /href="\/docs\/(tool-calling|structured-output|reasoning)"/g,
+        ),
+      ].map((m) => m[1]),
+    ),
+  ].map((page) =>
+    page === 'tool-calling'
+      ? 'tools'
+      : page === 'structured-output'
+        ? 'structured_outputs'
+        : 'reasoning',
+  )
+const isChatTable = (head: Array<string>) =>
+  head[0] === 'Model ID' && head.includes('Context window')
+/** Chat lines list only their Standard IDs on the models page; each has its own page. */
+export function metaChatFamilies(html: string): Array<string> {
+  return sections(html, 2)
+    .filter((s) => tables(s.body).some((rows) => isChatTable(rows[0] ?? [])))
+    .map((s) => s.id)
+}
+export const metaFamilyUrl = (id: string) => `https://dev.meta.ai/docs/${id}`
+/** A chat line's own page: its at-a-glance facts and every hosted ID with its mode. */
+function parseMetaFamily(html: string, family: string): Array<ModelInfo> {
+  const source = article(html)
+  const all = tables(source)
+  const glance = new Map(
+    (all.find((rows) => rows.some((row) => row[0] === 'Context window')) ?? [])
+      .filter((row) => row.length === 2)
+      .map((row) => [row[0] ?? '', row[1] ?? '']),
+  )
+  const input = glance.get('Input')
+  const output = glance.get('Output')
+  if (!input || !output) fail('missing model modalities')
+  const context = Number(
+    (glance.get('Context window') ?? '')
+      .replace(/ tokens$/, '')
+      .replace(/,/g, ''),
+  )
+  if (!Number.isSafeInteger(context) || context <= 0)
+    fail('unreadable model context')
+  const rows = all.find((t) => ['Variant', 'Version'].includes(t[0]?.[0] ?? ''))
+  if (!rows) fail('missing model availability table')
+  const head = rows[0] ?? []
+  if (head[1] !== 'Model API (pay-as-you-go)')
+    fail('model availability headers changed')
+  const capabilities = capabilityLinks(source)
+  const out: Array<ModelInfo> = []
+  for (const row of rows.slice(1)) {
+    if (row.length !== head.length) fail('invalid or duplicate model row')
+    if (row[1] === 'Not available') continue
+    const id = /^(.+) \(([a-z0-9][a-z0-9.-]*)\)$/.exec(row[0] ?? '')
+    const tier =
+      /^(?:Available \()?(Standard|Contributor) mode(?: only\))?$/.exec(
+        row[1] ?? '',
+      )?.[1]
+    if (!id?.[1] || !id[2]) fail('invalid or duplicate model row')
+    if (!tier) fail('unreadable model availability')
+    out.push({
+      rawId: id[2],
+      displayName: id[1],
+      activity: 'chat',
+      modalities: { input: list(input), output: list(output) },
+      contextWindow: context,
+      maxOutput: null,
+      capabilities,
+      pricing: null,
+      reasoning: null,
+      providerMetadata: { family, tier },
+    })
+  }
+  return out
+}
+/** `families` maps each `metaChatFamilies` section id to that line's page. */
+export function parseMetaModels(
+  html: string,
+  families: Record<string, string>,
+): Array<ModelInfo> {
   const out: Array<ModelInfo> = []
   const seen = new Set<string>()
   const add = (model: ModelInfo) => {
@@ -81,70 +161,32 @@ export function parseMetaModels(html: string): Array<ModelInfo> {
     out.push(model)
   }
   for (const section of sections(html, 2)) {
-    const capabilities = [
-      ...section.body.matchAll(
-        /href="(\/docs\/(?:tool-calling|structured-output|reasoning))"/g,
-      ),
-    ]
-      .map((m) =>
-        m[1] === '/docs/tool-calling'
-          ? 'tools'
-          : m[1] === '/docs/structured-output'
-            ? 'structured_outputs'
-            : 'reasoning',
-      )
-      .filter((flag, i, all) => all.indexOf(flag) === i)
-    const text = plain(section.body)
-    const chatRows = out.length
+    const capabilities = capabilityLinks(section.body)
     for (const rows of tables(section.body)) {
       const head = rows[0] ?? []
-      // Chat lines list their hosted IDs in an availability table and state
-      // modalities and context once, in the section prose.
-      if (['Variant', 'Version'].includes(head[0] ?? '')) {
-        if (head[1] !== 'Model API (pay-as-you-go)')
-          fail('model availability headers changed')
-        const io = /\btakes? ([^.]+?) input, returns? ([^,.]+)/.exec(text)
-        const contexts = [
-          ...new Set(
-            [...text.matchAll(/\b([\d,]+)-token context window\b/g)].map(
-              (m) => m[1] ?? '',
-            ),
-          ),
-        ]
-        const context = Number(contexts[0]?.replace(/,/g, ''))
-        if (!io?.[1] || !io[2]) fail('missing model modalities')
+      if (head[0] !== 'Model ID') continue
+      const ids = rows.slice(1).flatMap((row) => {
+        const cell = (row[0] ?? '').split(/,\s*/)
         if (
-          contexts.length !== 1 ||
-          !Number.isSafeInteger(context) ||
-          context <= 0
+          row.length !== head.length ||
+          cell.some((id) => !/^[a-z0-9][a-z0-9.-]*$/.test(id))
         )
-          fail('unreadable model context')
-        for (const row of rows.slice(1)) {
-          if (row.length !== head.length) fail('invalid or duplicate model row')
-          if (row[1] === 'Not available') continue
-          const id = /^(.+) \(([a-z0-9][a-z0-9.-]*)\)$/.exec(row[0] ?? '')
-          const tier =
-            /^(?:Available \()?(Standard|Contributor) mode(?: only\))?$/.exec(
-              row[1] ?? '',
-            )?.[1]
-          if (!id?.[1] || !id[2]) fail('invalid or duplicate model row')
-          if (!tier) fail('unreadable model availability')
-          add({
-            rawId: id[2],
-            displayName: id[1],
-            activity: 'chat',
-            modalities: { input: list(io[1]), output: list(io[2]) },
-            contextWindow: context,
-            maxOutput: null,
-            capabilities,
-            pricing: null,
-            reasoning: null,
-            providerMetadata: { family: section.name, tier },
-          })
-        }
+          fail('invalid or duplicate model row')
+        return cell
+      })
+      if (isChatTable(head)) {
+        const page = families[section.id]
+        if (page === undefined) fail(`missing model page ${section.id}`)
+        const models = parseMetaFamily(page, section.name)
+        // The models page lists exactly the Standard IDs its line's page has.
+        const standard = models
+          .filter((m) => m.providerMetadata?.tier === 'Standard')
+          .map((m) => m.rawId)
+        if ([...standard].sort().join() !== [...ids].sort().join())
+          fail(`${section.name} page disagrees with the model table`)
+        models.forEach(add)
         continue
       }
-      if (head[0] !== 'Model ID') continue
       const inputCol = head.findIndex(
         (h) => h === 'Input modalities' || h === 'Input',
       )
@@ -153,33 +195,13 @@ export function parseMetaModels(html: string): Array<ModelInfo> {
       )
       if (inputCol < 0 || outputCol < 0) fail('model modality headers changed')
       for (const row of rows.slice(1)) {
+        if ((row[0] ?? '').includes(',')) fail('invalid or duplicate model row')
         const rawId = row[0] ?? ''
-        if (
-          row.length !== head.length ||
-          !rawId ||
-          !/^[a-z0-9][a-z0-9.-]*$/.test(rawId)
-        )
-          fail('invalid or duplicate model row')
         const input = row[inputCol]
         const output = row[outputCol]
         if (!input || !output) fail('missing model modalities')
-        const contextCol = head.indexOf('Context window')
-        const context =
-          contextCol < 0
-            ? null
-            : Number(
-                (row[contextCol] ?? '')
-                  .replace(/ tokens$/, '')
-                  .replace(/,/g, ''),
-              )
-        if (
-          context !== null &&
-          (!Number.isSafeInteger(context) || context <= 0)
-        )
-          fail('unreadable model context')
-        const activity = head.includes('Tier')
-          ? 'chat'
-          : output === 'Image'
+        const activity =
+          output === 'Image'
             ? 'image'
             : section.name === 'Muse Voice Transcribe'
               ? 'audio'
@@ -194,25 +216,15 @@ export function parseMetaModels(html: string): Array<ModelInfo> {
               : null,
           activity,
           modalities: { input: csv(input), output: csv(output) },
-          contextWindow: context,
+          contextWindow: null,
           maxOutput: null,
           capabilities,
           pricing: null,
           reasoning: null,
-          providerMetadata: {
-            family: section.name,
-            ...(head.includes('Tier')
-              ? { tier: row[head.indexOf('Tier')] }
-              : {}),
-          },
+          providerMetadata: { family: section.name },
         })
       }
     }
-    if (
-      /-token context window\b/.test(text) &&
-      !out.slice(chatRows).some((model) => model.activity === 'chat')
-    )
-      fail('chat section listed no models')
   }
   if (!out.length) fail('model table listed no models')
   // A layout change that hides the chat tables must not read as removals.
@@ -463,7 +475,8 @@ export function metaOperation(
             contentHeads[i + 1]?.index ?? block.length,
           )
           .split(/<h3\b/)[0] ?? ''
-      const id = body.match(/href="[^"#]*\/schemas#([^"]+)"/)?.[1]
+      // Usually `<resource>/schemas#id`; Messages links the same ids on its own page.
+      const id = body.match(/href="\/docs\/api-reference\/[^"#]+#([^"]+)"/)?.[1]
       let schema: Schema
       if (id) {
         if (!schemas[id]) fail('missing native schema reference')
