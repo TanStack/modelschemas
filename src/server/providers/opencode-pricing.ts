@@ -9,9 +9,9 @@ import type { RateCard, TokenRateTier } from '@modelschemas/rate-card'
 import { assertParsed, cachedDocs } from './model-facts.ts'
 import { fetchText, sha256Text } from './types.ts'
 
-/** Source of https://opencode.ai/v2/docs/console/models/; markdown tables parse more stably than the rendered HTML. */
+/** Source of https://opencode.ai/docs/console/models/; markdown tables parse more stably than the rendered HTML. */
 export const OPENCODE_PRICING_URL =
-  'https://raw.githubusercontent.com/anomalyco/opencode/dev/services/www/src/docs/content/console/models.mdx'
+  'https://raw.githubusercontent.com/anomalyco/opencode/dev/services/site/src/docs/content/console/models.mdx'
 
 const PRICE_HEADER = ['Model', 'Input', 'Output', 'Cached Read', 'Cached Write']
 const PRICE_LEVERS = [

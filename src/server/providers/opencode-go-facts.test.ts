@@ -12,7 +12,7 @@ describe('openCodeGoFacts', () => {
     expect(facts.trainsOnRequestData).toBeNull()
     expect(facts.factSources.requiredRequestHeaders).toMatchObject({
       derivation: 'docs-derived',
-      sourceUrl: 'https://opencode.ai/docs/go/',
+      sourceUrl: 'https://opencode.ai/docs/console/go/',
     })
     expect(facts.factSources.trainsOnRequestData).toBeUndefined()
   })

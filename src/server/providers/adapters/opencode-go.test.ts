@@ -115,7 +115,7 @@ describe('opencode-go', () => {
     })
     expect(byId.mini?.factSources?.trainsOnRequestData).toMatchObject({
       derivation: 'docs-derived',
-      sourceUrl: 'https://opencode.ai/docs/go/',
+      sourceUrl: 'https://opencode.ai/docs/console/go/',
       path: 'Privacy',
     })
     expect(byId.kimi?.trainsOnRequestData).toBeNull()

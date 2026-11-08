@@ -149,7 +149,7 @@ only: the row's price, limits, and other facts stay its own provider's.
   `GET /v1/openapi/{provider}` as `schema.const` and is not copied here.
   Null when the provider publishes none. OpenCode Go lists
   `x-opencode-session` and `User-Agent`
-  ([Go docs](https://opencode.ai/docs/go/), "Where can I use it?"). The
+  ([Go docs](https://opencode.ai/docs/console/go/), "Where can I use it?"). The
   same headers are parameters on each Go operation.
 - `trainsOnRequestData` (`true | null`): true when that model's own source
   states it trains on request data. OpenCode Go reads the Privacy table

@@ -12,10 +12,10 @@ import type {
 export const ROUTE_ONLY_MARKER = 'x-modelschemas-route-only'
 const ROUTE_ACTIVITY = 'x-modelschemas-opencode-activity'
 const DOCS_ROOT =
-  'https://raw.githubusercontent.com/anomalyco/opencode/dev/services/www/src/docs/content/console/'
-/** Source of https://opencode.ai/v2/docs/console/api/inference/: Zen's Endpoints table. */
+  'https://raw.githubusercontent.com/anomalyco/opencode/dev/services/site/src/docs/content/console/'
+/** Source of https://opencode.ai/docs/console/api/inference/: Zen's Endpoints table. */
 export const OPENCODE_ROUTE_DOCS_URL = `${DOCS_ROOT}api/inference.mdx`
-/** Source of https://opencode.ai/v2/docs/console/go/: Go's per-model Endpoints table. */
+/** Source of https://opencode.ai/docs/console/go/: Go's per-model Endpoints table. */
 export const OPENCODE_GO_ROUTE_DOCS_URL = `${DOCS_ROOT}go.mdx`
 const ORIGIN = 'https://opencode.ai'
 

@@ -13,7 +13,7 @@ rates remain distinct from billed token prices.
 
 The current chat score does not erase unknown activity on other live ids.
 Native live listing: https://opencode.ai/inference/go/v1/models, the one
-https://opencode.ai/v2/docs/console/go/ documents. Endpoint ids are the
+https://opencode.ai/docs/console/go/ documents. Endpoint ids are the
 models.dev `api` path plus the package suffix (`inference/go/<protocol>/...`),
 checked against that page's Endpoints table (#393). Go `cost` in
 https://models.dev/api.json is not stored: it is not confirmed as a billed

@@ -8,8 +8,8 @@ import { requiredHeaderParameters } from './connect.ts'
 import { probesFor } from './probes/index.ts'
 import type { FactSource, ModelFactSources, RequiredHeader } from './types.ts'
 
-/** https://opencode.ai/docs/go/ */
-export const OPENCODE_GO_DOCS_URL = 'https://opencode.ai/docs/go/'
+/** https://opencode.ai/docs/console/go/ (`/docs/go/` 301s here). */
+export const OPENCODE_GO_DOCS_URL = 'https://opencode.ai/docs/console/go/'
 
 export const OPENCODE_GO_REQUIRED_HEADERS: Array<RequiredHeader> = [
   {
