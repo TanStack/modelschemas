@@ -81,6 +81,25 @@ function namedIds(text: string, names: Map<string, string>): Array<string> {
   return result
 }
 
+/** Ids a cell names; a Claude name outside the guide's model table throws. */
+function scopeIds(
+  text: string,
+  names: Map<string, string>,
+  scope: string,
+): Array<string> {
+  let unmatched = clean(text)
+  for (const name of names.keys())
+    unmatched = unmatched.replace(
+      new RegExp(`(?<![\\w.])${escape(name)}(?![\\w]|\\.\\d|\\s+\\d)`, 'g'),
+      '',
+    )
+  if (/\bClaude\s+[A-Z0-9]/.test(unmatched))
+    throw new Error(
+      `amazon-bedrock adaptive thinking: unsupported named scope for ${scope}`,
+    )
+  return namedIds(text, names)
+}
+
 export function parseBedrockExtendedThinking(
   text: string,
 ): Record<string, ModelReasoning> {
@@ -140,17 +159,7 @@ export function parseBedrockAdaptiveThinking(
     if (!level || !description || row.length !== 2 || seen.has(level))
       throw new Error('amazon-bedrock adaptive thinking: unreadable effort row')
     seen.add(level)
-    const named = namedIds(description, supported)
-    let unmatched = clean(description)
-    for (const name of supported.keys())
-      unmatched = unmatched.replace(
-        new RegExp(`(?<![\\w.])${escape(name)}(?![\\w]|\\.\\d|\\s+\\d)`, 'g'),
-        '',
-      )
-    if (/\bClaude\s+[A-Z0-9]/.test(unmatched))
-      throw new Error(
-        `amazon-bedrock adaptive thinking: unsupported named scope for ${level}`,
-      )
+    const named = scopeIds(description, supported, level)
     const scoped =
       /\bonly\b|\bsupports?\b|\bsupported\b|unsupported models/i.test(
         description,
@@ -172,72 +181,51 @@ export function parseBedrockAdaptiveThinking(
         'amazon-bedrock adaptive thinking: model has no published effort levels',
       )
   }
-  // Read operational declarations, never infer mandatory from defaults or enums.
-  const declare = (ids: Array<string>, mandatory: boolean) => {
+  // mandatory comes only from the guide's per-model thinking.type table, never
+  // from defaults or effort descriptions.
+  const config = rows(
+    markdownSection(native, 'Thinking configuration by model'),
+  )
+  const head = config[0]?.map(clean) ?? []
+  const disabled = head.indexOf('"disabled"')
+  const betweenTools = head.indexOf('"between_tools"')
+  if (
+    head[0] !== 'Model' ||
+    disabled < 0 ||
+    betweenTools < 0 ||
+    config.length < 2
+  )
+    throw new Error(
+      'amazon-bedrock adaptive thinking: missing thinking configuration table',
+    )
+  const configured = new Set<string>()
+  for (const row of config.slice(1)) {
+    const ids = scopeIds(row[0] ?? '', supported, 'thinking configuration')
+    const off = clean(row[disabled] ?? '')
+    const tools = clean(row[betweenTools] ?? '')
+    // "Thinking off" states it can be turned off; a 400 on both off switches
+    // states it cannot. Sonnet 5.5's between_tools drops only up-front
+    // thinking, which states neither. Any other wording throws.
+    const mandatory = /^Thinking off\b/.test(off)
+      ? false
+      : off === '400 error' && tools === '400 error'
+        ? true
+        : off === '400 error' && /^Up-front thinking off\b/.test(tools)
+          ? null
+          : undefined
+    if (!ids.length || row.length !== head.length || mandatory === undefined)
+      throw new Error(
+        `amazon-bedrock adaptive thinking: unreadable thinking configuration row for ${clean(row[0] ?? '')}`,
+      )
     for (const id of ids) {
       const control = result[id]
-      if (!control) continue
-      if (control.mandatory != null && control.mandatory !== mandatory)
+      if (!control || configured.has(id))
         throw new Error(
-          `amazon-bedrock adaptive thinking: contradictory disabling evidence for ${id}`,
+          `amazon-bedrock adaptive thinking: duplicate thinking configuration for ${id}`,
         )
+      configured.add(id)
       control.mandatory = mandatory
     }
-  }
-  for (const line of native.split('\n')) {
-    if (
-      /disabled thinking[^\n]*are not supported on these models/.test(line) &&
-      !/\b(?:not|never|assume|example|hypothetical)\b/i.test(
-        line.split(/only\*? support adaptive thinking/)[0] ?? '',
-      )
-    ) {
-      declare(
-        namedIds(
-          line.split(/only\*? support adaptive thinking/)[0] ?? '',
-          supported,
-        ),
-        true,
-      )
-    }
-    if (
-      /supports adaptive and disabled thinking/.test(line) &&
-      !/\b(?:not|never|assume|example|hypothetical)\b/i.test(
-        line.split('supports adaptive and disabled thinking')[0] ?? '',
-      )
-    ) {
-      declare(
-        namedIds(
-          line.split('supports adaptive and disabled thinking')[0] ?? '',
-          supported,
-        ),
-        false,
-      )
-    }
-    if (
-      /also supports disabled thinking/.test(line) &&
-      !/\b(?:not|never|assume|example|hypothetical)\b/i.test(
-        line.split('also supports disabled thinking')[0] ?? '',
-      )
-    ) {
-      declare(
-        namedIds(
-          line.split('also supports disabled thinking')[0] ?? '',
-          supported,
-        ),
-        false,
-      )
-    }
-  }
-  const defaultBlock = native.match(
-    /^\*\*Adaptive thinking is on by default on (.+?)\.\*\*[^\n]*\n([^\n]+)/m,
-  )
-  if (
-    defaultBlock &&
-    /To turn thinking off entirely on these models[^\n]*disabled/.test(
-      defaultBlock[2] ?? '',
-    )
-  ) {
-    declare(namedIds(defaultBlock[1] ?? '', supported), false)
   }
   return result
 }

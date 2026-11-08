@@ -173,9 +173,9 @@ describe('AWS native thinking guides', () => {
     ).toBeUndefined()
     expect(controls['anthropic.claude-fable-5']).toBeUndefined()
   })
-  it('reads all twelve adaptive rows and restricts max/xhigh to their own named scopes', () => {
+  it('reads all thirteen linked adaptive rows and scopes max/xhigh to their Supported-on lists', () => {
     const controls = parseBedrockAdaptiveThinking(adaptive)
-    expect(Object.keys(controls)).toHaveLength(12)
+    expect(Object.keys(controls)).toHaveLength(13)
     expect(controls['anthropic.claude-opus-5']).toEqual({
       mode: 'adaptive',
       mandatory: false,
@@ -183,70 +183,33 @@ describe('AWS native thinking guides', () => {
     })
     expect(controls['anthropic.claude-sonnet-4-6']).toEqual({
       mode: 'adaptive',
-      mandatory: null,
+      mandatory: false,
       efforts: ['max', 'high', 'medium', 'low'],
     })
-    expect(controls['anthropic.claude-opus-5-5']).toEqual({
-      mode: 'adaptive',
-      mandatory: null,
-      efforts: ['high', 'medium', 'low'],
-    })
-    expect(controls['anthropic.claude-fable-5']).toEqual({
-      mode: 'adaptive',
-      mandatory: true,
-      efforts: ['high', 'medium', 'low'],
-    })
-    expect(controls['anthropic.claude-opus-4-7']?.mandatory).toBe(false)
-    expect(controls['anthropic.claude-haiku-5-5']?.mandatory).toBe(false)
-  })
-  it('does not infer mandatory from always-thinks effort descriptions, a default or examples', () => {
-    const noOperationalNotes = adaptive
-      .replace(
-        /^.*(?:supports adaptive and disabled thinking|also supports disabled thinking|disabled thinking[^\n]*not supported on these models).*$/gm,
-        '',
-      )
-      .replace(/^\*\*Adaptive thinking is on by default[^\n]*\n[^\n]*$/gm, '')
-    const controls = parseBedrockAdaptiveThinking(noOperationalNotes)
-    expect(
-      Object.values(controls).every((control) => control.mandatory === null),
-    ).toBe(true)
-    const negated =
-      noOperationalNotes +
-      '\nDo not assume Claude Opus 5.5 supports adaptive and disabled thinking.\n'
-    expect(
-      parseBedrockAdaptiveThinking(negated)['anthropic.claude-opus-5-5']
-        ?.mandatory,
-    ).toBeNull()
-    const fenced =
-      adaptive +
-      '\n```\n| invented | all models |\nClaude Opus 5.5 supports adaptive and disabled thinking.\n```\n'
-    expect(parseBedrockAdaptiveThinking(fenced)).toEqual(
-      parseBedrockAdaptiveThinking(adaptive),
+    expect(controls['anthropic.claude-opus-4-6-v1']?.efforts).not.toContain(
+      'xhigh',
     )
   })
-  it('reads max from linked model-card names and a default-on parenthetical', () => {
-    const linked = adaptive
-      .replace(
-        /^\| (Claude [^|]+) \|/gm,
-        '| [$1](model-card-anthropic-claude-example.md) |',
-      )
-      .replace(
-        '| max | Claude always thinks with no constraints on thinking depth. Claude Opus 4.6, Claude Sonnet 4.6, Claude Opus 5, and Claude Haiku 5.5 support max. Requests using max on unsupported models return an error. |',
-        '| max | Claude thinks the most readily. Supported on Claude Opus 5, Claude Opus 4.6, and Claude Sonnet 4.6. |',
-      )
-      .replace('| high (default) |', '| high (default on most models) |')
-      .replace(
-        '| medium |',
-        '| medium (default on Claude Opus 5.5 and Claude Haiku 5.5) |',
-      )
-    const controls = parseBedrockAdaptiveThinking(linked)
-    expect(controls['anthropic.claude-opus-5']?.efforts).toContain('max')
-    expect(controls['anthropic.claude-sonnet-4-6']?.efforts).toContain('max')
-    expect(controls['anthropic.claude-opus-5-5']?.efforts).not.toContain('max')
-    expect(controls['anthropic.claude-opus-5-5']?.efforts).toContain('medium')
-    expect(controls['anthropic.claude-haiku-5-5']?.efforts).toContain('high')
+  it('reads mandatory from the thinking configuration table only', () => {
+    const controls = parseBedrockAdaptiveThinking(adaptive)
+    // "disabled" and "between_tools" both 400.
+    expect(controls['anthropic.claude-opus-5-5']?.mandatory).toBe(true)
+    expect(controls['anthropic.claude-fable-5']?.mandatory).toBe(true)
+    // "Thinking off", with or without an effort limit.
+    expect(controls['anthropic.claude-haiku-5-5']?.mandatory).toBe(false)
+    expect(controls['anthropic.claude-opus-4-7']?.mandatory).toBe(false)
+    // between_tools drops only up-front thinking: stated neither way.
+    expect(controls['anthropic.claude-sonnet-5-5']?.mandatory).toBeNull()
+    const prose =
+      adaptive + '\nClaude Opus 5.5 supports adaptive and disabled thinking.\n'
+    expect(parseBedrockAdaptiveThinking(prose)).toEqual(controls)
+    const fenced =
+      adaptive +
+      '\n```\n| Claude Opus 5.5 | Adaptive | Adaptive | 400 error | 400 error | Thinking off |\n```\n'
+    expect(parseBedrockAdaptiveThinking(fenced)).toEqual(controls)
   })
   it('rejects missing tables, malformed native rows and unreadable restricted model scopes', () => {
+    const maxRow = /^\| max \| .*$/m
     expect(() =>
       parseBedrockAdaptiveThinking(
         adaptive.replace('| Model | Model ID |', '| Changed | Model ID |'),
@@ -260,16 +223,24 @@ describe('AWS native thinking guides', () => {
     expect(() =>
       parseBedrockAdaptiveThinking(
         adaptive.replace(
-          'Claude Opus 5, Claude Opus 4.6, and Claude Haiku 5.5 only.',
-          'Claude Opus 5 and Claude Future 9 only.',
+          '(model-card-anthropic-claude-haiku-5-5.md)',
+          '(model-card-anthropic-claude-haiku-5-5.md "card")',
         ),
       ),
     ).toThrow('unsupported named scope')
     expect(() =>
       parseBedrockAdaptiveThinking(
         adaptive.replace(
-          'Claude Opus 5, Claude Opus 4.6, and Claude Haiku 5.5 only.',
-          'Selected future models only.',
+          maxRow,
+          '| max | Deepest. Supported on Claude Opus 5 and Claude Future 9. |',
+        ),
+      ),
+    ).toThrow('unsupported named scope')
+    expect(() =>
+      parseBedrockAdaptiveThinking(
+        adaptive.replace(
+          maxRow,
+          '| max | Deepest. Supported on selected future models. |',
         ),
       ),
     ).toThrow('model scope')
@@ -287,7 +258,32 @@ describe('AWS native thinking guides', () => {
       ),
     ).toThrow('budget declaration')
   })
-  it('rejects embedded or negated mode declarations and never stamps mandatory from a negated restriction', () => {
+  it('rejects a missing or unreadable thinking configuration table', () => {
+    expect(() =>
+      parseBedrockAdaptiveThinking(
+        adaptive.replace('## Thinking configuration by model', '## Renamed'),
+      ),
+    ).toThrow('missing thinking configuration table')
+    expect(() =>
+      parseBedrockAdaptiveThinking(
+        adaptive.replace(
+          /^(\| Claude Sonnet 5 \|.*\| )Thinking off( \|\s*)$/m,
+          '$1Thinking reduced$2',
+        ),
+      ),
+    ).toThrow('unreadable thinking configuration row')
+    expect(() =>
+      parseBedrockAdaptiveThinking(
+        adaptive.replace('| Claude Sonnet 5 |', '| Claude Sonnet 9 |'),
+      ),
+    ).toThrow('unsupported named scope')
+    expect(() =>
+      parseBedrockAdaptiveThinking(
+        adaptive.replace('| Claude Sonnet 5 |', '| Claude Opus 5 |'),
+      ),
+    ).toThrow('duplicate thinking configuration')
+  })
+  it('rejects an embedded or negated mode declaration', () => {
     expect(() =>
       parseBedrockExtendedThinking(
         extended.replace(
@@ -304,14 +300,6 @@ describe('AWS native thinking guides', () => {
         ),
       ),
     ).toThrow('mode or effort table')
-    const negated = adaptive.replace(
-      'Claude Fable 5.1, Claude Mythos 5.1, Claude Mythos 5, and Claude Fable 5 *only* support',
-      'Never infer Claude Fable 5.1, Claude Mythos 5.1, Claude Mythos 5, and Claude Fable 5 *only* support',
-    )
-    expect(
-      parseBedrockAdaptiveThinking(negated)['anthropic.claude-fable-5']
-        ?.mandatory,
-    ).toBeNull()
   })
   it('joins only the card-owned IDs, preserving existing controls and the source for every filled object', () => {
     const base = 'anthropic.claude-opus-5'
@@ -379,7 +367,13 @@ describe('AWS native thinking guides', () => {
       })),
       [guide],
     )
-    expect(result[0]?.reasoning?.efforts).toEqual(['high', 'medium', 'low'])
+    expect(result[0]?.reasoning?.efforts).toEqual([
+      'max',
+      'xhigh',
+      'high',
+      'medium',
+      'low',
+    ])
     expect(result[0]?.factSources?.reasoning?.sourceUrl).toBe(
       BEDROCK_ADAPTIVE_THINKING_URL,
     )
@@ -450,7 +444,7 @@ describe('AWS native thinking guides', () => {
       reasoning: {
         mode: 'adaptive',
         mandatory: null,
-        efforts: ['low', 'medium', 'high'],
+        efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
       } as ModelReasoning,
     }
     const result = applyBedrockThinkingGuides(
@@ -467,7 +461,7 @@ describe('AWS native thinking guides', () => {
     expect(result[0]?.reasoning).toEqual({
       mode: 'adaptive',
       mandatory: false,
-      efforts: ['low', 'medium', 'high'],
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     })
     expect(result[0]?.factSources?.reasoning?.sourceUrl).toBe(
       BEDROCK_ADAPTIVE_THINKING_URL,
