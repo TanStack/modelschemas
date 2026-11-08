@@ -243,17 +243,21 @@ describe('DashScope China native source parsing', () => {
 })
 
 describe('DashScope evidence boundaries', () => {
-  it('treats a parenthetical support note as a stated yes', () => {
-    const rows = applyCnTextFacts(
-      [{ rawId: 'kimi-k3.1-pro', displayName: null }],
-      {
-        text: `<table><tr><th>模型ID</th><th>上下文</th><th>结构化输出</th></tr><tr><td><code>kimi-k3.1-pro</code></td><td>1M</td><td>支持（JSON Mode）</td></tr></table>`,
-        url: 'https://help.aliyun.com/zh/model-studio/text-generation-model.md',
-        hash: 'a'.repeat(64),
-      },
-    )
-    expect(rows[0]?.capabilities).toEqual(['structured_outputs'])
+  const structuredCell = (cell: string) =>
+    applyCnTextFacts([{ rawId: 'kimi-k3.1-pro', displayName: null }], {
+      text: `<table><tr><th>模型ID</th><th>上下文</th><th>结构化输出</th></tr><tr><td><code>kimi-k3.1-pro</code></td><td>1M</td><td>${cell}</td></tr></table>`,
+      url: 'https://help.aliyun.com/zh/model-studio/text-generation-model.md',
+      hash: 'a'.repeat(64),
+    })
+  it('reads JSON Mode as response_format, not structured outputs', () => {
+    const rows = structuredCell('支持（JSON Mode）')
+    expect(rows[0]?.capabilities).toEqual(['response_format'])
     expect(rows[0]?.unsupportedCapabilities).toEqual([])
+  })
+  it('refuses any other qualified support note', () => {
+    expect(() => structuredCell('支持（仅思考模式）')).toThrow(
+      'unknown capability support value: 支持（仅思考模式）',
+    )
   })
   it('records explicit negatives without claiming a complete capability vocabulary', () => {
     const rows = applyCnTextFacts(
