@@ -1,5 +1,11 @@
 # @modelschemas/client
 
+## 0.2.4
+
+### Patch Changes
+
+- f0d8773: Cite the OpenCode Go console page that replaced `/docs/go/` in the generated client descriptions.
+
 ## 0.2.3
 
 ### Patch Changes

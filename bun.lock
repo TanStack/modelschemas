@@ -139,7 +139,7 @@
     },
     "packages/cli": {
       "name": "modelschemas",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "bin": {
         "modelschemas": "./src/index.ts",
       },
@@ -151,14 +151,14 @@
     },
     "packages/client": {
       "name": "@modelschemas/client",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "devDependencies": {
         "@modelschemas/rate-card": "workspace:*",
       },
     },
     "packages/codegen": {
       "name": "@modelschemas/codegen",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "peerDependencies": {
         "prettier": ">=3",
       },
@@ -168,7 +168,7 @@
     },
     "packages/rate-card": {
       "name": "@modelschemas/rate-card",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "peerDependencies": {
         "zod": "^4.3.6",
       },
@@ -178,7 +178,7 @@
     },
     "packages/vite": {
       "name": "@modelschemas/vite",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "dependencies": {
         "@modelschemas/codegen": "workspace:*",
       },
