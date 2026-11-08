@@ -1,3 +1,4 @@
+import { evaluateCard } from '@modelschemas/rate-card/evaluator'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -110,6 +111,80 @@ describe('replicate prediction prices', () => {
       bound: 'usage',
       values: ['480p', '720p'],
     })
+  })
+
+  it('sums each metric a two-criterion tier quotes', () => {
+    // xai/grok-imagine-image-2's billingConfig, 2026-10-31.
+    const tier = (variant: string, resolution: string, output: string) => ({
+      criteria: [
+        { title: 'model variant', type: 'equals', value: variant },
+        { title: 'target resolution', type: 'equals', value: resolution },
+      ],
+      prices: [
+        {
+          metric: 'image_output_count',
+          price: output,
+          title: 'per output image',
+          type: 'per-unit',
+        },
+        {
+          metric: 'image_input_megapixel_count',
+          price: '$0.01',
+          title: 'per input image megapixel',
+          type: 'per-unit',
+        },
+      ],
+    })
+    const card = compileReplicateBilling(
+      {
+        current_tiers: [
+          tier('low', '1k', '$0.04'),
+          tier('low', '2k', '$0.06'),
+          tier('medium', '1k', '$0.06'),
+          tier('medium', '2k', '$0.08'),
+        ],
+      },
+      SOURCE,
+    )
+    expect(card?.tables.output_images).toEqual({
+      low: { '1k': 0.04, '2k': 0.06 },
+      medium: { '1k': 0.06, '2k': 0.08 },
+    })
+    if (!card) throw new Error('no card')
+    const priced = evaluateCard(card, {
+      usage: {
+        model_variant: 'medium',
+        target_resolution: '2k',
+        output_images: 2,
+        input_megapixels: 3,
+      },
+    })
+    expect(priced.amount).toBeCloseTo(2 * 0.08 + 3 * 0.01, 10)
+    // Unkeyed tiers name nothing to choose between them.
+    expect(
+      compileReplicateBilling(
+        {
+          current_tiers: [
+            { criteria: [], prices: tier('low', '1k', '$0.04').prices },
+            { criteria: [], prices: tier('low', '1k', '$0.09').prices },
+          ],
+        },
+        SOURCE,
+      ),
+    ).toBeNull()
+    // A tier missing from the grid is not a card.
+    expect(
+      compileReplicateBilling(
+        {
+          current_tiers: [
+            tier('low', '1k', '$0.04'),
+            tier('low', '2k', '$0.06'),
+            tier('medium', '1k', '$0.06'),
+          ],
+        },
+        SOURCE,
+      ),
+    ).toBeNull()
   })
 
   it('leaves an empty billing config and an unknown unit null', () => {
