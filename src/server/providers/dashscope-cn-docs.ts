@@ -365,9 +365,10 @@ export function applyCnTextFacts(models: ModelInfo[], doc: CnDoc): ModelInfo[] {
         const flag = mapped[head[index]!]
         if (!flag) continue
         const value = cnText(row[index]!)
-        if (value !== '支持' && value !== '不支持')
-          fail('unknown capability support value')
-        if (value === '支持') capabilities.push(flag)
+        // "支持（JSON Mode）" is still a stated yes, with the mechanism in parentheses.
+        const support = /^(支持|不支持)(?:（[^）]+）)?$/.exec(value)
+        if (!support) fail(`unknown capability support value: ${value}`)
+        if (support[1] === '支持') capabilities.push(flag)
         else unsupportedCapabilities.push(flag)
       }
       for (const id of ids) {

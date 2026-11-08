@@ -243,6 +243,18 @@ describe('DashScope China native source parsing', () => {
 })
 
 describe('DashScope evidence boundaries', () => {
+  it('treats a parenthetical support note as a stated yes', () => {
+    const rows = applyCnTextFacts(
+      [{ rawId: 'kimi-k3.1-pro', displayName: null }],
+      {
+        text: `<table><tr><th>模型ID</th><th>上下文</th><th>结构化输出</th></tr><tr><td><code>kimi-k3.1-pro</code></td><td>1M</td><td>支持（JSON Mode）</td></tr></table>`,
+        url: 'https://help.aliyun.com/zh/model-studio/text-generation-model.md',
+        hash: 'a'.repeat(64),
+      },
+    )
+    expect(rows[0]?.capabilities).toEqual(['structured_outputs'])
+    expect(rows[0]?.unsupportedCapabilities).toEqual([])
+  })
   it('records explicit negatives without claiming a complete capability vocabulary', () => {
     const rows = applyCnTextFacts(
       cnPriceModels(prices),

@@ -18,7 +18,7 @@ export const DASHSCOPE_CN_FLASH =
 const EXPECTED_TITLES = [
   '模型调用价格',
   '选择模型',
-  '文本生成',
+  '文本生成与视觉理解',
   'qwen-flash',
 ] as const
 const URLS = [
