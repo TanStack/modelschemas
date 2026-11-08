@@ -7,8 +7,9 @@ import {
  * OpenAI model facts from OpenAI's own docs. `GET /v1/models` is `id` +
  * `created` only; developers.openai.com serves every model page as
  * markdown (`/api/docs/models/{slug}.md`) with a fixed "Model details"
- * bullet list, a "Supported features" list, and the page's snapshot ids. The index (`/api/docs/models.md`) is the
- * slug list. Only pages the listed ids resolve to are fetched (~65 of the
+ * bullet list, a "Supported features" list, and the page's snapshot ids. The index (`/api/docs/models/all.md`) is the
+ * slug list: `/api/docs/models.md` lists only current models since
+ * 2026-11-03 (#570), and older listed ids lost their pages (and prices). Only pages the listed ids resolve to are fetched (~65 of the
  * ~130 listed ids share a page), bounded-concurrency, memoised six hours.
  */
 import { compileTokenCard, compileUnitCard } from '@modelschemas/rate-card'
@@ -43,7 +44,7 @@ import type { FactSource, ModelInfo, ModelReasoning } from './types.ts'
 import type { Fetcher } from './us-egress.ts'
 
 export const OPENAI_MODELS_INDEX_URL =
-  'https://developers.openai.com/api/docs/models.md'
+  'https://developers.openai.com/api/docs/models/all.md'
 export const OPENAI_PRICING_URL =
   'https://developers.openai.com/api/docs/pricing.md'
 export const OPENAI_MODEL_PAGE = (slug: string) =>
