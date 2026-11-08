@@ -403,13 +403,28 @@ function sections(markdown: string): Array<string> {
     .filter((chunk) => chunk.startsWith('## '))
 }
 
-/** Ids linked in backticks above the section's first `{% hr /%}`. */
+const LINKED_ID = /\[`([a-z0-9][a-z0-9.-]+)`\]\(/g
+
+/**
+ * Ids linked in backticks above the section's first `{% hr /%}`; prose
+ * below it names other models. A section that links ids but has no rule
+ * throws: dropping its ids would read as "no longer priced" and clear
+ * their stored cards. Tool and Gemma sections link no ids and pass.
+ */
 function headingIds(section: string): Array<string> {
   const end = section.indexOf('{% hr /%}')
-  if (end < 0) return []
-  return [
-    ...section.slice(0, end).matchAll(/\[`([a-z0-9][a-z0-9.-]+)`\]\(/g),
-  ].map(([, value = '']) => value)
+  if (end < 0) {
+    const table = section.search(/^\|/m)
+    if (section.slice(0, table < 0 ? undefined : table).match(LINKED_ID)) {
+      throw new Error(
+        `gemini pricing page: no {% hr /%} under ${JSON.stringify(section.split('\n')[0])}`,
+      )
+    }
+    return []
+  }
+  return [...section.slice(0, end).matchAll(LINKED_ID)].map(
+    ([, value = '']) => value,
+  )
 }
 
 /**
@@ -459,11 +474,13 @@ export function parseGeminiPricing(
     const table = standardTable(section)
     if (!table) continue
     const [header = [], ...body] = table
+    // The last column is read as the paid price only when it says so.
     const unit = header
       .at(-1)
       ?.match(/^Paid Tier, per (.+?) in USD$/)?.[1]
       ?.trim()
-    if (unit !== undefined && unit !== '1M tokens') {
+    if (unit === undefined) continue
+    if (unit !== '1M tokens') {
       if (!(unit in UNIT_QUANTITY)) continue
       const rows = parseUnitRows(body)
       if (!rows) continue

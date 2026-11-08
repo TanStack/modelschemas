@@ -10,6 +10,7 @@ import { GEMINI_DEPRECATIONS_URL } from './gemini-bindings.ts'
 import {
   GEMINI_PRICING_URL,
   geminiModelPricing,
+  geminiNamedIds,
   parseGeminiPricing,
 } from './gemini-pricing.ts'
 import { geminiCapabilities } from './gemini.ts'
@@ -1317,6 +1318,27 @@ ${table(unit, rows)}
     expect(rows.has('aqa')).toBe(false)
     expect(rows.has('antigravity-preview-09-2026')).toBe(false)
     expect(rows.has('gemini-flash-latest')).toBe(false)
+  })
+
+  it('throws on a section that links ids but has no {% hr /%}', () => {
+    const rows = `<tr><td>Input price</td><td>Free of charge</td><td>$0.30</td></tr>`
+    const broken = section('gemini-2.5-flash', rows).replace('{% hr /%}', '')
+    expect(() => geminiNamedIds(broken)).toThrow(/no \{% hr \/%\}/)
+    expect(() => parseGeminiPricing(broken, NOW)).toThrow(/no \{% hr \/%\}/)
+    // A tools section links no ids and has no rule: skipped, not thrown.
+    const tools = `## Pricing for tools  {% id="pricing-for-tools" %}\n\n${table('1M tokens', rows)}\n`
+    expect(geminiNamedIds(tools)).toEqual([])
+  })
+
+  it('skips a table whose last column is not the paid tier', () => {
+    const rows = parseGeminiPricing(
+      section(
+        'gemini-2.5-flash',
+        `<tr><td>Input price</td><td>Free of charge</td><td>$0.30</td></tr>`,
+      ).replace(/Paid Tier, per 1M tokens in USD/g, 'Enterprise'),
+      NOW,
+    )
+    expect(rows.has('gemini-2.5-flash')).toBe(false)
   })
 
   it('compiles the long-prompt re-quote as a tier', () => {
