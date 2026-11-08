@@ -698,6 +698,13 @@ describe('mistral model page price and max output', () => {
     expect(() =>
       parseMistralMarkdownPrice('- Pricing: $0.1 /M Tokens'),
     ).toThrow(/unreadable markdown meter/)
+    // No `Free`: a side-less $0 could be a placeholder, not a stated price.
+    expect(() => parseMistralMarkdownPrice('- Pricing: $0 /M Tokens')).toThrow(
+      /unreadable markdown meter/,
+    )
+    expect(() =>
+      parseMistralMarkdownPrice('- Pricing: Free; $0 /request'),
+    ).toThrow(/unknown denominator/)
     expect(
       parseMistralMarkdownPrice('# Model\n- Status: Deprecated'),
     ).toBeNull()

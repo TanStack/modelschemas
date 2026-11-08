@@ -907,6 +907,7 @@ export function parseMistralMarkdownPrice(
     throw new Error('mistral model page pricing: empty Pricing line')
   }
   let free = false
+  let sideless: string | null = null
   const meters: Array<{
     side: 'input' | 'output'
     label?: string
@@ -918,8 +919,8 @@ export function parseMistralMarkdownPrice(
       free = true
       continue
     }
-    // The side label is optional: `Free; $0 /M Tokens` (moderation) states
-    // no side. Without a side only a $0 meter is readable.
+    // The side label is optional only on a Free line's $0 meter:
+    // `Free; $0 /M Tokens` (moderation). Checked after the loop.
     const match =
       /^(?:(input|output|cached input)\s+)?\$([\d,]+(?:\.\d+)?)\s+(\/\S+(?:\s+\S+)*)$/i.exec(
         part,
@@ -931,10 +932,18 @@ export function parseMistralMarkdownPrice(
       )
     }
     if (!match[1]) {
-      if (amount === 0) continue
-      throw new Error(
-        `mistral model page pricing: unreadable markdown meter ${JSON.stringify(part)}`,
-      )
+      if (amount !== 0) {
+        throw new Error(
+          `mistral model page pricing: unreadable markdown meter ${JSON.stringify(part)}`,
+        )
+      }
+      if (!priceFamily(match[3])) {
+        throw new Error(
+          `mistral model page pricing: unknown denominator ${match[3]}`,
+        )
+      }
+      sideless = part
+      continue
     }
     const label = match[1].toLowerCase()
     meters.push({
@@ -943,6 +952,11 @@ export function parseMistralMarkdownPrice(
       denominator: match[3],
       amount,
     })
+  }
+  if (sideless !== null && !free) {
+    throw new Error(
+      `mistral model page pricing: unreadable markdown meter ${JSON.stringify(sideless)}`,
+    )
   }
   if (free && meters.some((meter) => meter.amount > 0)) {
     throw new Error(
