@@ -1,6 +1,6 @@
 {
   "name": "@modelschemas/codegen",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Pull core for modelschemas build-time schema/type generation: selection grammar, conditional fetch, lockfile manifest, file writer.",
   "type": "module",
   "main": "./src/index.ts",
