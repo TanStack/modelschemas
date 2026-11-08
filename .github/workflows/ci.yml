@@ -20,7 +20,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+      - uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
         with:
           advanced-security: false
 
@@ -49,9 +49,9 @@ jobs:
 
       # A PR that changes a published package (packages/*, including the
       # generated client) needs a changeset, or `bunx changeset --empty`.
-      # Dependabot can't write changesets; the Version Packages PR consumes them.
+      # Renovate can't write changesets; the Version Packages PR consumes them.
       - name: Changeset check
-        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.head_ref != 'changeset-release/main'
+        if: github.event_name == 'pull_request' && github.actor != 'renovate[bot]' && github.head_ref != 'changeset-release/main'
         run: bunx changeset status --since=origin/main
 
       # The committed client must match the spec (PLAN.md task 7.4).

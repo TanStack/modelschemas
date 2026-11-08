@@ -29,4 +29,4 @@ const integrity = await verifyIntegrity({ outDir: 'src/modelschemas', selections
 ```
 
 Docs: [modelschemas.com/docs](https://modelschemas.com/docs) · Source:
-[github.com/modelschemas/modelschemas](https://github.com/modelschemas/modelschemas)
+[github.com/TanStack/modelschemas](https://github.com/TanStack/modelschemas)

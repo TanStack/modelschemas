@@ -58,7 +58,7 @@ describe('extractAsyncApiSchemas', () => {
   })
 
   it('does not bump the OpenAPI extractor version', () => {
-    expect(EXTRACTOR_VERSION).toBe('1')
+    expect(EXTRACTOR_VERSION).toBe('2')
   })
 })
 

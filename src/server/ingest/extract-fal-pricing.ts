@@ -6,6 +6,9 @@
  * and the model poll stores those; this job still owns every other section.
  */
 import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { createAnthropicChat } from '@tanstack/ai-anthropic'
+import { cloudflareBindingFetch } from '@tanstack/ai-cloudflare'
+import { chat } from '@tanstack/ai'
 import { z } from 'zod'
 
 import { cardParams, verifyExamples } from '@modelschemas/rate-card'
@@ -66,17 +69,33 @@ export function falPricingExtractCursorKey(providerId = 'fal'): string {
   return `${FAL_PRICING_EXTRACT_CURSOR_KEY}:${providerId}`
 }
 
-/** Single extract model — fail-closed; never a second guess. */
-export const FAL_PRICING_EXTRACT_MODEL = 'grok-4-fast'
+/**
+ * Single extract model — fail-closed; never a second guess. Picked by
+ * `scripts/compare-fal-extract-models.ts` (#550). Anthropic's id, which the
+ * adapter needs for its model table; `GATEWAY_MODEL_IDS` names it on the wire.
+ */
+export const FAL_PRICING_EXTRACT_MODEL = 'claude-sonnet-5-5'
 
-const XAI_CHAT_URL = 'https://api.x.ai/v1/chat/completions'
+/**
+ * Cloudflare's catalog id for each Anthropic id (#556): the gateway knows
+ * `anthropic/claude-sonnet-5.5` and 500s on Anthropic's `claude-sonnet-5-5`.
+ * The binding fetch adds the `anthropic/` prefix.
+ */
+export const GATEWAY_MODEL_IDS = {
+  'claude-sonnet-5-5': 'claude-sonnet-5.5',
+  'claude-haiku-5-5': 'claude-haiku-5.5',
+} as const
 
 const extractedBodySchema = rateCardSchema.omit({ source: true }).extend({
   expiresAt: z.iso.datetime().optional(),
 })
 
 const extractedResponseSchema = z.union([
-  z.object({ unverified: z.literal(true) }),
+  // expiresAt: the section's only price is a promo that ended then (#552).
+  z.object({
+    unverified: z.literal(true),
+    expiresAt: z.iso.datetime().optional(),
+  }),
   extractedBodySchema,
 ])
 
@@ -101,7 +120,7 @@ export interface FalPricingExtractOutcome {
   error?: string
 }
 
-/** `{ error }` = no card this run, and why (xAI HTTP error or empty reply, a throw, or two rejections). */
+/** `{ error }` = no card this run, and why (gateway error or empty reply, a throw, or two rejections). */
 export type ExtractedCard = RateCard | 'unverified' | { error: string }
 
 export interface ExtractCardArgs {
@@ -118,6 +137,9 @@ export type FalLlmsFetchResult = string | null | { status: number }
 export interface FalPricingExtractDeps extends SyncDeps {
   fetchText?: (url: string) => Promise<FalLlmsFetchResult>
   extractCard?: (args: ExtractCardArgs) => Promise<ExtractedCard>
+  /** Workers AI binding + AI Gateway id; both unset = leftovers skipped. */
+  ai?: Ai
+  gatewayId?: string
   fetchCap?: number
   extractCap?: number
   providerId?: string
@@ -136,6 +158,10 @@ export function pricingSection(llmsTxt: string): string {
  * suffix-`$` spellings (`$**0.04**`, `**0.17** $`) are real prices, not
  * stubs (issue #70).
  */
+/** A section that names a promo or its end; only these may answer "ended". */
+const PROMO_WORDS =
+  /\b(?:promo(?:tion(?:al)?)?|limited[- ]time|until|through|ends?|expires?)\b/i
+
 export function isStubPricingSection(section: string): boolean {
   return usdAmounts(section).length === 0
 }
@@ -228,26 +254,21 @@ function logFetchFailure(
   )
 }
 
-function chatContent(data: unknown): string | null {
-  if (!isRecord(data)) return null
-  const choices = data.choices
-  if (!Array.isArray(choices)) return null
-  const first: unknown = choices[0]
-  if (!isRecord(first)) return null
-  const message = first.message
-  if (!isRecord(message) || typeof message.content !== 'string') return null
-  return message.content
-}
-
 function parseJsonObject(text: string): unknown {
   const trimmed = text.trim()
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed)
-  const body = fenced?.[1] ?? trimmed
+  // The model often explains itself first, fenced or not; the object is
+  // the reply (#552 — the repair turn was paying for the prose). The
+  // schema and verifyExamples still judge what it holds.
+  const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(trimmed)
+  const body =
+    fenced?.[1] ??
+    trimmed.slice(trimmed.indexOf('{'), trimmed.lastIndexOf('}') + 1)
   return JSON.parse(body) as unknown
 }
 
 export const EXTRACT_SYSTEM = `You write a modelschemas RateCard — a price calculator — from a FAL model's llms.txt Pricing section.
 Return JSON only: {"inputs": {...}, "tables": {...}, "price": <JSONLogic>, "examples": [...]}, optionally "expiresAt" (ISO datetime) when the text names a promo end. Do not include a source object.
+A promo whose end is before today (the message states today) is over: price at the regular rate the text states, with no expiresAt; if it states no regular rate, return {"unverified": true, "expiresAt": <the promo end>}.
 
 inputs: name → {"param": <field>, "kind": "number"|"enum"|"boolean"|"count", "bound": "request"|"usage", "default"?: ..., "values"?: [...] (enum only)}.
 - A request-bound param MUST be one of the allowed request properties (or a dotted child of one). Give it a default when the request may omit it.
@@ -273,9 +294,11 @@ Example. Section: "Each edit costs $0.10, plus $0.02 per reference image." Allow
 function extractUserPrompt(
   pricingText: string,
   requestProperties: ReadonlySet<string>,
+  now: number,
 ): string {
   const allowed = [...requestProperties].sort().join(', ')
-  return `Allowed request properties: ${allowed || '(none)'}
+  return `Today: ${new Date(now * 1000).toISOString().slice(0, 10)}
+Allowed request properties: ${allowed || '(none)'}
 
 Pricing section:
 ${pricingText}`
@@ -318,15 +341,33 @@ export function checkExtractedCard(
   }
   const priced = !isStubPricingSection(args.pricingText)
   if ('unverified' in parsed.data || parsed.data.examples.length === 0) {
-    return priced
+    // An ended promo with no regular rate stated is no price: the reply
+    // names the end, the section names a promo, and the clock agrees
+    // (#552). The section check keeps a lazy refusal from unpricing a row.
+    const ended =
+      'unverified' in parsed.data &&
+      parsed.data.expiresAt !== undefined &&
+      PROMO_WORDS.test(args.pricingText) &&
+      Date.parse(parsed.data.expiresAt) <= args.now * 1000
+    return priced && !ended
       ? {
           error: `the section names ${usdAmounts(args.pricingText)
             .map((usd) => `$${usd}`)
-            .join(', ')}; write the card with one example per quoted rate`,
+            .join(
+              ', ',
+            )}; write the card with one example per quoted rate, or {"unverified": true, "expiresAt": <end>} if its only price is a promo that has ended`,
         }
       : 'unverified'
   }
   const card = withSource(parsed.data, args)
+  // A card must not arrive already expired: the catalog would serve the
+  // ended promo until the next lap re-read it the same way (#552).
+  const expiresAt = card.source.expiresAt
+  if (expiresAt !== undefined && Date.parse(expiresAt) <= args.now * 1000) {
+    return {
+      error: `the promo ended ${expiresAt}; price at the regular rate the section states, without expiresAt`,
+    }
+  }
   if (!cardRequestParamsOk(card, args.requestProperties)) {
     return {
       error:
@@ -358,34 +399,77 @@ export function checkExtractedCard(
   return card
 }
 
-type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
+export type ChatTurn = { role: 'user' | 'assistant'; content: string }
 
-async function grokChat(
-  apiKey: string,
-  messages: Array<ChatMessage>,
-): Promise<string | { error: string }> {
-  const response = await fetch(XAI_CHAT_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: FAL_PRICING_EXTRACT_MODEL,
-      temperature: 0,
-      response_format: { type: 'json_object' },
-      messages,
-    }),
+/** The model's reply to these turns after `EXTRACT_SYSTEM`; throws on error. */
+export type ExtractChat = (turns: Array<ChatTurn>) => Promise<string>
+
+/**
+ * The extract model through Cloudflare AI Gateway on Unified Billing: the
+ * TanStack AI Anthropic adapter, its requests sent over the `env.AI`
+ * binding (which authenticates, so no provider key). No temperature: Claude 5
+ * models 400 on it (`anthropic-features.ts`). A gateway or provider error
+ * throws.
+ */
+export function gatewayChat(
+  ai: Ai,
+  gatewayId: string,
+  model: keyof typeof GATEWAY_MODEL_IDS = FAL_PRICING_EXTRACT_MODEL,
+): ExtractChat {
+  const bindingFetch = cloudflareBindingFetch({
+    binding: ai,
+    vendor: 'anthropic',
+    gateway: { id: gatewayId },
   })
-  if (!response.ok) {
-    const body = (await response.text()).slice(0, 200)
-    return { error: `xai ${response.status}: ${body}` }
-  }
-  return (
-    chatContent((await response.json()) as unknown) ?? {
-      error: 'xai reply has no message content',
+  // The Anthropic SDK reports a thrown fetch as a bare "Connection error."
+  // and drops the binding's error, so keep it and rethrow it as the cause.
+  let bindingError: unknown
+  const adapter = createAnthropicChat(model, 'cloudflare-binding', {
+    fetch: async (
+      input: Parameters<typeof bindingFetch>[0],
+      init?: RequestInit,
+    ) => {
+      try {
+        const response = await bindingFetch(input, withGatewayModel(init))
+        // A retry got through: an earlier throw is not this call's cause.
+        bindingError = undefined
+        return response
+      } catch (error) {
+        bindingError = error
+        throw error
+      }
+    },
+  })
+  const threadId = crypto.randomUUID()
+  return async (turns) => {
+    bindingError = undefined
+    try {
+      const { text } = await chat({
+        adapter,
+        threadId,
+        stream: false,
+        systemPrompts: [EXTRACT_SYSTEM],
+        messages: turns,
+      })
+      return text
+    } catch (error) {
+      if (bindingError === undefined) throw error
+      throw new Error(errorMessage(error), { cause: bindingError })
     }
-  )
+  }
+}
+
+/** The request with its `model` swapped for the gateway catalog id. */
+function withGatewayModel(
+  init: RequestInit | undefined,
+): RequestInit | undefined {
+  if (typeof init?.body !== 'string') return init
+  const body = JSON.parse(init.body) as { model?: string }
+  const ids: Partial<Record<string, string>> = GATEWAY_MODEL_IDS
+  const id = ids[body.model ?? '']
+  if (id === undefined)
+    throw new Error(`no gateway catalog id for model ${body.model}`)
+  return { ...init, body: JSON.stringify({ ...body, model: id }) }
 }
 
 /**
@@ -393,25 +477,27 @@ async function grokChat(
  * reason (same model — not a fallback). `{ error }` = no card this run; the
  * caller holds the cursor so the next shard retries it, and reports why.
  */
-export async function extractRateCardWithGrok(
-  args: ExtractCardArgs & { apiKey: string },
+export async function extractRateCard(
+  args: ExtractCardArgs & { chat: ExtractChat },
 ): Promise<ExtractedCard> {
-  const messages: Array<ChatMessage> = [
-    { role: 'system', content: EXTRACT_SYSTEM },
+  const turns: Array<ChatTurn> = [
     {
       role: 'user',
-      content: extractUserPrompt(args.pricingText, args.requestProperties),
+      content: extractUserPrompt(
+        args.pricingText,
+        args.requestProperties,
+        args.now,
+      ),
     },
   ]
   try {
     let rejected = ''
     for (let turn = 0; turn < 2; turn++) {
-      const content = await grokChat(args.apiKey, messages)
-      if (typeof content !== 'string') return content
+      const content = await args.chat(turns)
       const checked = checkExtractedCard(content, args)
       if (checked === 'unverified' || !('error' in checked)) return checked
       rejected = checked.error
-      messages.push(
+      turns.push(
         { role: 'assistant', content },
         {
           role: 'user',
@@ -688,11 +774,12 @@ async function extractFalPricingScoped(
     cursor: null,
   }
 
-  const apiKey = deps.secrets.XAI_API_KEY
+  const { ai, gatewayId } = deps
   const extract =
     deps.extractCard ??
-    (apiKey
-      ? (args: ExtractCardArgs) => extractRateCardWithGrok({ ...args, apiKey })
+    (ai && gatewayId
+      ? (args: ExtractCardArgs) =>
+          extractRateCard({ ...args, chat: gatewayChat(ai, gatewayId) })
       : null)
 
   try {
@@ -940,7 +1027,8 @@ async function extractFalPricingScoped(
     const failed = new Set<string>()
     const reasons = new Set<string>()
     if (leftovers.size > 0 && extract === null) {
-      outcome.skipped = 'XAI_API_KEY not set — leftovers skipped'
+      outcome.skipped =
+        'AI binding or AI_GATEWAY_ID not set — leftovers skipped'
     } else if (leftovers.size > 0 && extract !== null) {
       const groups = [...leftovers.entries()]
       const results = await mapLimit(

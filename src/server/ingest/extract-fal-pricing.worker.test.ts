@@ -536,7 +536,7 @@ describe('extractFalPricing', () => {
     expect(extracts).toBe(1)
   })
 
-  it('still compiles unit rates without XAI_API_KEY and skips only leftovers', async () => {
+  it('still compiles unit rates without the AI binding and skips only leftovers', async () => {
     const providerId = 'extract-nokey'
     await seedProvider(providerId)
     const unitId = await seedCandidate({
@@ -561,7 +561,7 @@ describe('extractFalPricing', () => {
       providerId,
       fetchText: (url: string) => Promise.resolve(files.get(url) ?? null),
     })
-    expect(outcome.skipped).toContain('XAI_API_KEY')
+    expect(outcome.skipped).toContain('AI_GATEWAY_ID')
     expect(outcome).toMatchObject({ compiled: 1, written: 1, extracted: 0 })
     const unit = await getDb(env).query.models.findFirst({
       where: eq(models.id, unitId),

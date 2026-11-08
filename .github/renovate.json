@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "configMigration": true,
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    "group:allNonMajor",
+    "schedule:weekly",
+    ":approveMajorUpdates",
+    ":disablePeerDependencies",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)"
+  ],
+  "ignorePresets": [":ignoreModulesAndTests"],
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "minimumReleaseAge": "7 days",
+  "packageRules": [
+    {
+      "description": "@types/node tracks the Node major the workflows run (24). Minors and patches still come through the non-major group.",
+      "matchPackageNames": ["@types/node"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "Pre-1.0 and changes the generated client. Own PR so a failing check:client does not block the non-major group.",
+      "matchPackageNames": ["@hey-api/openapi-ts"],
+      "groupName": null
+    },
+    {
+      "description": "GitHub Actions in one PR, majors included. Dependabot grouped every action the same way.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "groupSlug": "actions"
+    }
+  ]
+}

@@ -2,14 +2,31 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "modelschemas",
   "compatibility_date": "2025-09-02",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "enable_ctx_exports"],
   "main": "src/worker.ts",
   "vars": {
     // Agent JWT audiences are origin-bound.
     "BETTER_AUTH_URL": "https://modelschemas.com",
+    // FAL rate-card extract runs through this AI Gateway on Unified Billing
+    // (credits on the Cloudflare bill, no provider key). Created by hand in
+    // the dashboard.
+    "AI_GATEWAY_ID": "modelschemas",
   },
   "observability": {
     "enabled": true,
+  },
+  // Workers Cache. Only the `CachedReads` entrypoint (catalog, schema and
+  // OpenAPI GETs; see src/worker.ts) is cached; the default entrypoint
+  // skips the cache lookup so HTML, auth, changes and status pay nothing.
+  // A request with Authorization is still cached because those responses
+  // say `public` (Cloudflare's rule). `enable_ctx_exports` is what lets
+  // the default entrypoint call CachedReads.
+  "cache": {
+    "enabled": false,
+  },
+  "exports": {
+    "default": { "type": "worker", "cache": { "enabled": false } },
+    "CachedReads": { "type": "worker", "cache": { "enabled": true } },
   },
   "workers_dev": true,
   "routes": [{ "pattern": "modelschemas.com", "custom_domain": true }],
@@ -43,6 +60,9 @@
     // not a floor — unused headroom costs nothing.
     "cpu_ms": 300000,
   },
+  "ai": {
+    "binding": "AI",
+  },
   "browser": {
     "binding": "BROWSER",
     "remote": true,
@@ -71,6 +91,10 @@
       "binding": "DB",
       "database_name": "modelschemas",
       "database_id": "557c12a0-dbad-4d46-8925-36315d8ecba9",
+      // Read replication is not a wrangler flag. Turn it on
+      // (`read_replication.mode: auto`) only after #554 recreates this
+      // database with a US primary. Public GETs already use
+      // withSession('first-unconstrained'); until then they run on the primary.
       "migrations_dir": "drizzle",
     },
   ],

@@ -43,11 +43,13 @@ export const Route = createFileRoute('/v1/changes')({
           )
         }
 
-        // ?wait=Ns long-poll (task 11.3): hold until a new change lands.
+        // Primary, not a replica. Cursors and ?wait= must see the latest
+        // write; a lagging replica would skip or repeat a page.
+        const db = getDb(env)
         const waitSeconds = parseWaitSeconds(url)
-        if (waitSeconds > 0) await waitForNewChange(getDb(env), waitSeconds)
+        if (waitSeconds > 0) await waitForNewChange(db, waitSeconds)
 
-        const outcome = await listChanges(getDb(env), {
+        const outcome = await listChanges(db, {
           since,
           provider: url.searchParams.get('provider') ?? undefined,
           type: (type as ChangeType | null) ?? undefined,

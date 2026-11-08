@@ -29,6 +29,7 @@ import type {
   ProviderSecrets,
   SpecFetchResult,
 } from '../types.ts'
+import { bearerConnect } from '../connect.ts'
 
 const DEEPSEEK_MODELS_URL = 'https://api.deepseek.com/models'
 
@@ -43,6 +44,7 @@ export const provider: ProviderConfig = {
   specSourceUrl: DEEPSEEK_CHAT_DOCS,
   modelsEndpoint: DEEPSEEK_MODELS_URL,
   defaultDerivation: 'generated',
+  connect: bearerConnect('https://api.deepseek.com'),
   fetchSpec,
   listModels: async (env, kv): Promise<ListModelsResult> => {
     const listed = await listOpenAiCompatibleModels({

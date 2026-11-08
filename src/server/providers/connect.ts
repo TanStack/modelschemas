@@ -8,8 +8,12 @@ import type {
   SpecGrain,
 } from './types.ts'
 
-/** Refuse assembly above this many classified generation endpoints. */
-export const MAX_SPEC_PATHS = 40
+/**
+ * Queue documents narrowed with `?activity=`: FAL `video` was 653 models
+ * and `image` 638 (2026-11-04), each inlined as its own schema. The
+ * unnarrowed queue document is uncapped because it inlines none.
+ */
+export const MAX_QUEUE_SPEC_PATHS = 1024
 
 export function bearerConnect(
   serverUrl: string,

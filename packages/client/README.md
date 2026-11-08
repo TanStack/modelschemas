@@ -38,4 +38,4 @@ independently verifiable.
 
 Docs: [modelschemas.com/docs](https://modelschemas.com/docs) · API spec:
 [/openapi.json](https://modelschemas.com/openapi.json) · Source:
-[github.com/modelschemas/modelschemas](https://github.com/modelschemas/modelschemas)
+[github.com/TanStack/modelschemas](https://github.com/TanStack/modelschemas)

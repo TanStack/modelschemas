@@ -15,7 +15,7 @@ import type { OpenApiDocument } from '#/server/providers/types.ts'
  * provider's classify/fetchSpec could alter derived schemas — it tells
  * verifiers which extractor produced a stored hash.
  */
-export const EXTRACTOR_VERSION = '1'
+export const EXTRACTOR_VERSION = '2'
 
 export type JsonValue =
   | string
@@ -38,8 +38,25 @@ export interface BundleResult {
 export interface ExtractedEndpointSchemas {
   /** Bundled, self-contained input schema; absent when the endpoint has no JSON/multipart body. */
   input?: Record<string, JsonValue>
+  /**
+   * Media type the input schema was taken from. `multipart/form-data` when
+   * the call uploads a file. Absent when there is no body.
+   */
+  inputContentType?: string
   /** Bundled output schema; absent for binary-media endpoints (TTS audio, …). */
   output?: Record<string, JsonValue>
+  /**
+   * Bundled SSE event schema, set only when the success body also has a
+   * JSON schema. The JSON schema stays `output`. Absent when the only
+   * stored body is already the stream schema (speech).
+   */
+  streamOutput?: Record<string, JsonValue>
+  /**
+   * Success-response media types to publish. JSON and `text/event-stream`
+   * are both kept, on one operation in the generation document. Audio and
+   * other non-JSON types stay.
+   */
+  outputContentTypes?: Array<string>
   warnings: Array<string>
 }
 
@@ -147,11 +164,26 @@ export function bundleSchema(
   }
   if (closure.size === 0) return { schema, warnings }
 
-  const defs: Record<string, JsonValue> = {}
+  // An inline schema can carry its own `$defs` (Mistral's speech stream):
+  // keep them beside the component closure.
+  const defs: Record<string, JsonValue> = isObject(schema.$defs)
+    ? { ...schema.$defs }
+    : {}
   for (const refName of [...closure].sort()) {
     const target = resolveSchema(refName)
     if (target === undefined) continue
-    defs[refName] = rewriteRefs(target, rootName)
+    const rewritten = rewriteRefs(target, rootName)
+    const local = defs[refName]
+    if (
+      local !== undefined &&
+      JSON.stringify(local) !== JSON.stringify(rewritten)
+    ) {
+      warnings.push(
+        `${context}: local $defs '${refName}' differs from the component of the same name; kept the local one`,
+      )
+      continue
+    }
+    defs[refName] = rewritten
   }
   return { schema: { ...schema, $defs: defs }, warnings }
 }
@@ -233,18 +265,76 @@ function resolveContentSchema(
   return { root: schema, rootName: null }
 }
 
+/** Media type without parameters, lowercased. */
+function mediaTypeBase(value: string): string {
+  return value.split(';')[0]?.trim().toLowerCase() ?? ''
+}
+
+function isJsonType(value: string): boolean {
+  const base = mediaTypeBase(value)
+  return base === 'application/json' || base.endsWith('+json')
+}
+
+function isEventStream(value: string): boolean {
+  const base = mediaTypeBase(value)
+  return base === 'text/event-stream' || base.endsWith('/event-stream')
+}
+
+function isMultipart(value: string): boolean {
+  return mediaTypeBase(value) === 'multipart/form-data'
+}
+
+/**
+ * Type stored and published. Stream types collapse to `text/event-stream`
+ * so hey-api's exact media-type check selects the SSE client.
+ */
+function canonicalMediaType(value: string): string {
+  if (isEventStream(value)) return 'text/event-stream'
+  if (isMultipart(value)) return 'multipart/form-data'
+  if (isJsonType(value)) return 'application/json'
+  return mediaTypeBase(value)
+}
+
+function schemaHasBinary(node: JsonValue, depth = 0): boolean {
+  if (depth > 8 || typeof node !== 'object' || node === null) return false
+  if (Array.isArray(node)) {
+    return node.some((item) => schemaHasBinary(item, depth + 1))
+  }
+  if (node.format === 'binary' || typeof node.contentMediaType === 'string') {
+    return true
+  }
+  return Object.values(node).some((value) => schemaHasBinary(value, depth + 1))
+}
+
+/**
+ * Content types to put on the generation document's success response.
+ * See `ExtractedEndpointSchemas.outputContentTypes`. A boolean `stream`
+ * field is not a media type: SSE is published only when the success
+ * body lists an event-stream type.
+ */
+export function responseContentTypesFor(
+  content: Record<string, MediaContent> | undefined,
+): Array<string> | undefined {
+  if (!content) return undefined
+  const types: Array<string> = []
+  for (const raw of Object.keys(content)) {
+    const type = canonicalMediaType(raw)
+    if (type !== '' && !types.includes(type)) types.push(type)
+  }
+  return types.length > 0 ? types : undefined
+}
+
 /**
  * Extract + bundle the input/output schemas for one endpoint.
  *
- * Input: request body — `application/json`, falling back to
- * `multipart/form-data` (media endpoints take multipart uploads whose
- * fields are described by an ordinary schema; the PR's multipart fix).
+ * Input: request body. A file upload (`multipart/form-data`, or a multipart
+ * schema that contains a binary field) wins over `application/json` —
+ * declaring both makes `@hey-api/openapi-ts` send the file as JSON.
  *
- * Output:
- * - 'post-200': first success response (200/201/202 — ElevenLabs dubbing
- *   acks with 201, OpenRouter video jobs with 202) carrying a JSON schema.
- * - 'sibling-get': the sibling GET `${path}/requests/{request_id}` 200
- *   response (FAL: the POST returns a queue ack).
+ * Output schema stays the JSON success body when one exists (200/201/202,
+ * or the sibling GET for FAL). When that body also lists an event-stream
+ * schema, `streamOutput` is that schema. A boolean `stream` property does
+ * not invent a stream response.
  */
 export function extractEndpointSchemas(
   spec: OpenApiDocument,
@@ -261,43 +351,67 @@ export function extractEndpointSchemas(
   const post = operation
 
   let input: Record<string, JsonValue> | undefined
-  const requestContent = post.requestBody?.content
-  const inputResolved = resolveContentSchema(
-    requestContent?.['application/json'] ??
-      requestContent?.['multipart/form-data'],
-    components,
-    `${pathKey} input`,
-    warnings,
-  )
-  if (inputResolved) {
-    const bundled = bundleSchema(
-      inputResolved.root,
+  let inputContentType: string | undefined
+  const chosenRequest = chooseRequestContent(post.requestBody?.content)
+  if (chosenRequest) {
+    const probe: Array<string> = []
+    const probed = resolveContentSchema(
+      chosenRequest.media,
       components,
-      inputResolved.rootName,
       `${pathKey} input`,
+      probe,
     )
-    input = bundled.schema
-    warnings.push(...bundled.warnings)
+    const multipartLosesToJson =
+      chosenRequest.contentType === 'multipart/form-data' &&
+      probed !== undefined &&
+      !schemaHasBinary(probed.root) &&
+      hasJsonBody(post.requestBody?.content)
+    const requestMedia = multipartLosesToJson
+      ? jsonBody(post.requestBody?.content)
+      : chosenRequest
+    if (requestMedia) {
+      inputContentType = requestMedia.contentType
+      const resolved =
+        requestMedia === chosenRequest
+          ? probed
+          : resolveContentSchema(
+              requestMedia.media,
+              components,
+              `${pathKey} input`,
+              warnings,
+            )
+      if (requestMedia === chosenRequest) warnings.push(...probe)
+      if (resolved) {
+        const bundled = bundleSchema(
+          resolved.root,
+          components,
+          resolved.rootName,
+          `${pathKey} input`,
+        )
+        input = bundled.schema
+        warnings.push(...bundled.warnings)
+      }
+    }
   } else if (method === 'get') {
     input = pathParameterSchema(operation)
   }
 
-  let outputContent: MediaContent | undefined
-  if (strategy === 'sibling-get') {
-    const sibling = spec.paths?.[`${pathKey}/requests/{request_id}`]?.get as
-      | OperationShape
-      | undefined
-    outputContent = sibling?.responses?.['200']?.content?.['application/json']
-  } else {
-    for (const status of ['200', '201', '202']) {
-      outputContent = post.responses?.[status]?.content?.['application/json']
-      if (outputContent?.schema !== undefined) break
-    }
-  }
+  const responses =
+    strategy === 'sibling-get'
+      ? (
+          spec.paths?.[`${pathKey}/requests/{request_id}`]?.get as
+            | OperationShape
+            | undefined
+        )?.responses
+      : post.responses
+  const bound = bindSuccessContent(responses)
+  const outputMedia =
+    bound?.json ??
+    (bound?.stream?.schema !== undefined ? bound.stream : undefined)
 
   let output: Record<string, JsonValue> | undefined
   const outputResolved = resolveContentSchema(
-    outputContent,
+    outputMedia,
     components,
     `${pathKey} output`,
     warnings,
@@ -313,7 +427,119 @@ export function extractEndpointSchemas(
     warnings.push(...bundled.warnings)
   }
 
-  return { input, output, warnings }
+  let streamOutput: Record<string, JsonValue> | undefined
+  if (bound?.json && bound.stream?.schema !== undefined) {
+    const streamResolved = resolveContentSchema(
+      bound.stream,
+      components,
+      `${pathKey} stream`,
+      warnings,
+    )
+    if (streamResolved) {
+      const bundled = bundleSchema(
+        streamResolved.root,
+        components,
+        streamResolved.rootName,
+        `${pathKey} stream`,
+      )
+      streamOutput = bundled.schema
+      warnings.push(...bundled.warnings)
+    }
+  }
+
+  const outputContentTypes = responseContentTypesFor(bound?.content)
+
+  return {
+    ...(input ? { input } : {}),
+    ...(inputContentType ? { inputContentType } : {}),
+    ...(output ? { output } : {}),
+    ...(streamOutput ? { streamOutput } : {}),
+    ...(outputContentTypes ? { outputContentTypes } : {}),
+    warnings,
+  }
+}
+
+interface ChosenContent {
+  media: MediaContent
+  contentType: string
+}
+
+function chooseRequestContent(
+  content: Record<string, MediaContent> | undefined,
+): ChosenContent | undefined {
+  if (!content) return undefined
+  const entries = Object.entries(content).filter(
+    (entry): entry is [string, MediaContent] => entry[1].schema !== undefined,
+  )
+  const multipart = entries.find(([type]) => isMultipart(type))
+  if (multipart) {
+    return {
+      media: multipart[1],
+      contentType: canonicalMediaType(multipart[0]),
+    }
+  }
+  const json = entries.find(([type]) => isJsonType(type))
+  const chosen = json ?? entries[0]
+  if (!chosen) return undefined
+  return { media: chosen[1], contentType: canonicalMediaType(chosen[0]) }
+}
+
+function hasJsonBody(
+  content: Record<string, MediaContent> | undefined,
+): boolean {
+  return jsonBody(content) !== undefined
+}
+
+function jsonBody(
+  content: Record<string, MediaContent> | undefined,
+): ChosenContent | undefined {
+  if (!content) return undefined
+  const json = Object.entries(content).find(
+    ([type, media]) => isJsonType(type) && media.schema !== undefined,
+  )
+  if (!json) return undefined
+  return { media: json[1], contentType: 'application/json' }
+}
+
+interface BoundSuccess {
+  content: Record<string, MediaContent>
+  json?: MediaContent
+  stream?: MediaContent
+}
+
+/**
+ * First success status that carries a JSON schema, otherwise the first
+ * success status that carries any content. The JSON schema is what we
+ * store; `content` is the map whose media types are published.
+ */
+function bindSuccessContent(
+  responses: OperationShape['responses'],
+): BoundSuccess | undefined {
+  if (!responses) return undefined
+  let first: Record<string, MediaContent> | undefined
+  for (const status of ['200', '201', '202']) {
+    const content = responses[status]?.content
+    if (!content || Object.keys(content).length === 0) continue
+    if (!first) first = content
+    const json = Object.entries(content).find(
+      ([type, media]) => isJsonType(type) && media.schema !== undefined,
+    )
+    if (json) {
+      const stream = Object.entries(content).find(([type]) =>
+        isEventStream(type),
+      )
+      return {
+        content,
+        json: json[1],
+        ...(stream ? { stream: stream[1] } : {}),
+      }
+    }
+  }
+  if (!first) return undefined
+  const stream = Object.entries(first).find(
+    ([type, media]) => isEventStream(type) && media.schema !== undefined,
+  )
+  return { content: first, ...(stream ? { stream: stream[1] } : {}) }
 }
 
 /** Endpoint id convention from the PR: the path minus its leading slash. */

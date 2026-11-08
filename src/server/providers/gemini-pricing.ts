@@ -9,8 +9,9 @@
  * levers, and any priced row, qualifier or unit the parser does not
  * recognise (per-image, per-minute, per-song, date-conditional, Batch or
  * Flex tables) refuses that model rather than quoting part of its bill.
- * A page that yields no model at all throws, so stored cards survive a
- * layout change until the parser is taught the new one.
+ * A page that yields no model at all throws inside `tryDocs`. The listing
+ * still writes, and every row keeps its stored card (`unavailable`) until
+ * the parser is taught the new page.
  */
 import { compileTokenCard, compileUnitCard } from '@modelschemas/rate-card'
 import type {
@@ -19,15 +20,21 @@ import type {
   UnitCardSpec,
 } from '@modelschemas/rate-card'
 
-import { geminiAutomaticRoutes } from './gemini-bindings.ts'
+import {
+  GEMINI_DEPRECATIONS_URL,
+  geminiAutomaticRoutes,
+} from './gemini-bindings.ts'
 import { tagDocsFacts } from './fact-sources.ts'
 import {
   assertParsed,
-  cachedDocs,
+  docsRun,
   parseDay,
   tokenCount,
+  tryDocs,
+  unavailable,
 } from './model-facts.ts'
 import { fetchText, sha256Text } from './types.ts'
+import type { DocsRun } from './model-facts.ts'
 import type { ModelInfo } from './types.ts'
 
 export const GEMINI_PRICING_URL =
@@ -492,28 +499,38 @@ type PricedFacts = Pick<ModelInfo, 'pricing' | 'factSources' | 'absent'>
  * Card lookup by model id. An id no section names is `cleared`: the page
  * visibly does not price it. An id a section names but the parser refuses
  * gets nothing, so its stored card is kept and `pricing_lost` is logged.
+ * A failed pricing or deprecations load is recorded on `run` and does not
+ * throw: every row is `unavailable` when the price page itself failed, and
+ * an id with no card of its own is `unavailable` when the routes page
+ * failed, so a blip cannot clear a card that page might have routed.
  */
 export async function geminiModelPricing(
   kv?: KVNamespace,
+  run: DocsRun = docsRun(),
 ): Promise<(rawId: string) => PricedFacts> {
   const [doc, routes] = await Promise.all([
-    cachedDocs(kv, GEMINI_PRICING_URL, async () => {
-      const html = await fetchText(GEMINI_PRICING_URL)
-      const parsed = parseGeminiPricing(html)
-      assertParsed(parsed, 'gemini pricing page')
-      return {
-        rates: Object.fromEntries(parsed),
-        named: geminiNamedIds(html),
-        hash: await sha256Text(html),
-        extractedAt: new Date().toISOString(),
-      }
-    }),
-    // A failed fetch, or a body that is not the deprecations page, throws,
-    // so a blip cannot clear the routed cards. A real page that names no
-    // automatic route is Google stating no automatic routing.
-    geminiAutomaticRoutes(kv),
+    tryDocs(run, GEMINI_PRICING_URL, (cached) =>
+      cached(kv, GEMINI_PRICING_URL, async () => {
+        const html = await fetchText(GEMINI_PRICING_URL)
+        const parsed = parseGeminiPricing(html)
+        assertParsed(parsed, 'gemini pricing page')
+        return {
+          rates: Object.fromEntries(parsed),
+          named: geminiNamedIds(html),
+          hash: await sha256Text(html),
+          extractedAt: new Date().toISOString(),
+        }
+      }),
+    ),
+    // A failed fetch, or a body that is not the deprecations page, is a
+    // docs failure. A real page that names no automatic route is Google
+    // stating no automatic routing.
+    tryDocs(run, GEMINI_DEPRECATIONS_URL, (cached) =>
+      geminiAutomaticRoutes(kv, cached),
+    ),
   ])
-  const routeTo = new Map(Object.entries(routes))
+  if (!doc) return () => unavailable('pricing')
+  const routeTo = new Map(Object.entries(routes ?? {}))
   const card = (rawId: string): RateCard | null => {
     const rates = doc.rates[rawId]
     if (!rates) return null
@@ -559,8 +576,12 @@ export async function geminiModelPricing(
       const pricing = card(pricedId)
       return pricing ? priced(pricing, `routed to ${pricedId}`) : {}
     }
+    // Routes unread: an id with no card of its own might still be routed.
+    // Keep the stored card. A page that loaded and does not name it is a clear.
     return named(rawId) || named(family) || named(target) || named(targetFamily)
       ? {}
-      : { absent: { pricing: 'cleared' } }
+      : routes
+        ? { absent: { pricing: 'cleared' } }
+        : unavailable('pricing')
   }
 }

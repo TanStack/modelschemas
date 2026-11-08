@@ -96,7 +96,11 @@ const getCalculator = createServerFn({ method: 'GET' })
       await import('#/server/rate-card.ts')
     const { seedValues } = await import('#/lib/rate-card-form.ts')
 
-    const model = await getModelDetail(getDb(env), data.provider, data.modelId)
+    const model = await getModelDetail(
+      getDb(env, { replica: true }),
+      data.provider,
+      data.modelId,
+    )
     const card = model ? parseStoredRateCard(model.pricing) : null
     if (model && model.pricing != null && !card) {
       console.error(

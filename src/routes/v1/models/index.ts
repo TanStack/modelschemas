@@ -6,7 +6,7 @@ import { activities } from '#/db/schema.ts'
 import type { Activity } from '#/db/schema.ts'
 import { jsonError } from '#/server/admin.ts'
 import { listModelsCatalog } from '#/server/catalog.ts'
-import { cachedJson } from '#/server/http-cache.ts'
+import { cachedJson, catalogCache } from '#/server/http-cache.ts'
 
 export const Route = createFileRoute('/v1/models/')({
   server: {
@@ -32,7 +32,7 @@ export const Route = createFileRoute('/v1/models/')({
             'provenance must be 0 or 1.',
           )
         }
-        const body = await listModelsCatalog(getDb(env), {
+        const body = await listModelsCatalog(getDb(env, { replica: true }), {
           activity: (activity as Activity | null) ?? undefined,
           provider: url.searchParams.get('provider') ?? undefined,
           capability: url.searchParams.get('capability') ?? undefined,
@@ -41,8 +41,7 @@ export const Route = createFileRoute('/v1/models/')({
           provenance: provenance !== '0',
           pricing: url.searchParams.get('pricing') === '1',
         })
-        const now = Math.floor(Date.now() / 1000)
-        return cachedJson(request, body, { fetchedAt: now, staleAt: now + 60 })
+        return cachedJson(request, body, catalogCache())
       },
     },
   },

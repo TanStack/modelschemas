@@ -348,6 +348,26 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/providers/{provider}': {
+      get: {
+        operationId: 'getProvider',
+        summary: 'One provider: status, counts, live models per activity',
+        description:
+          'The same row as GET /v1/providers plus activities: live model counts keyed by activity, the values GET /v1/openapi/{provider}?activity= and GET /v1/models?activity= accept.',
+        parameters: [providerParam],
+        responses: {
+          '200': {
+            description: 'Provider detail.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Provider' },
+              },
+            },
+          },
+          '404': errorResponse,
+        },
+      },
+    },
     '/v1/providers/{provider}/models': {
       get: {
         operationId: 'listProviderModels',
@@ -564,16 +584,16 @@ export const openApiDocument = {
         summary: 'Generation-only OpenAPI document for one provider',
         description:
           'Assembled from classified endpoints plus the provider connect profile (servers, auth, required headers). ' +
-          'Not a raw upstream-spec mirror. Model-grained providers (today: FAL) require ?model=. ' +
-          'Selections over 40 classified endpoints, or a filter that matches none, return 400 spec_requires_selector. ' +
+          'Not a raw upstream-spec mirror. FAL (model-grained, queue) is one document: POST /{endpoint_id} and GET /{endpoint_id}/requests/{request_id}. endpoint_id is the model raw id (x-modelschemas-encode raw: do not percent-encode slashes). ' +
+          "With no selector the bodies are untyped; ?activity= narrows the enum and inlines each model's own body schema (x-modelschemas-model), up to 1024 models; ?model= is that one model's paths. " +
+          'A filter that matches no endpoint returns 400 spec_requires_selector; there is no cap on the number of paths in a provider-grained document. ' +
           'An unsynced provider returns 404 no_endpoints. ?model= pins the live model enum on provider-grained specs; it does not drop endpoints.',
         parameters: [
           providerParam,
           {
             name: 'model',
             in: 'query',
-            description:
-              'Pin to one model (raw id or slug). Required for model-grained providers.',
+            description: 'Pin to one model (raw id or slug).',
             schema: { type: 'string' },
           },
           {
@@ -1200,6 +1220,53 @@ export const openApiDocument = {
               { type: 'string' },
               { type: 'object', additionalProperties: true },
             ],
+          },
+        },
+      },
+      Provider: {
+        type: 'object',
+        required: [
+          'id',
+          'displayName',
+          'status',
+          'counts',
+          'spec',
+          'activities',
+          '_links',
+        ],
+        description:
+          'One row of GET /v1/providers plus activities. Model counts are live rows; counts.deprecated holds the rest.',
+        properties: {
+          id: { type: 'string' },
+          displayName: { type: 'string' },
+          status: { type: 'string' },
+          lastPolledAt: { type: ['integer', 'null'] },
+          lastSyncedAt: { type: ['integer', 'null'] },
+          counts: { type: 'object', additionalProperties: { type: 'integer' } },
+          spec: {
+            type: 'object',
+            required: ['grain', 'endpointCount'],
+            properties: {
+              grain: { type: 'string', enum: ['provider', 'model'] },
+              endpointCount: { type: 'integer' },
+            },
+          },
+          activities: {
+            type: 'object',
+            description:
+              'Live model count per activity. A key is present only when the provider has a live model with that activity.',
+            propertyNames: { enum: activityEnum },
+            additionalProperties: { type: 'integer' },
+          },
+          _links: {
+            type: 'object',
+            required: ['self', 'models', 'schemas'],
+            properties: {
+              self: { $ref: '#/components/schemas/HalLink' },
+              models: { $ref: '#/components/schemas/HalLink' },
+              schemas: { $ref: '#/components/schemas/HalLink' },
+              openapi: { $ref: '#/components/schemas/HalLink' },
+            },
           },
         },
       },

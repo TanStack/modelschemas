@@ -25,6 +25,12 @@ import type {
   EffortLevelMap,
   ThinkingRequest,
 } from '../request-map.ts'
+import { bearerConnect } from '../connect.ts'
+import { compatGenerationEndpointId } from '../model-meta.ts'
+import {
+  classifyOpenAiCompat,
+  fetchOpenAiCompatibleSpec,
+} from '../openai-compat.ts'
 import { fetchJson, sha256Text } from '../types.ts'
 import { namespacedUpstreamIdentity } from '../upstream-model.ts'
 import type {
@@ -39,7 +45,12 @@ import type {
 
 export const VERCEL_MODELS_URL = 'https://ai-gateway.vercel.sh/v1/models'
 
-const SPEC_SKIP = 'vercel: no first-party OpenAPI document — skipped'
+/**
+ * The data plane (docs/ai-gateway/sdks-and-apis). Vercel publishes no
+ * OpenAPI document; the routes it documents as OpenAI-compatible are
+ * generated from OpenAI's.
+ */
+export const VERCEL_SERVER_URL = 'https://ai-gateway.vercel.sh/v1'
 
 const TYPE_ACTIVITY: Record<string, Activity> = {
   language: 'chat',
@@ -481,13 +492,25 @@ async function listModels(_env: ProviderSecrets): Promise<ListModelsResult> {
   }
 }
 
-function fetchSpec(_env: ProviderSecrets): Promise<SpecFetchResult> {
-  return Promise.resolve({
-    specs: [],
-    sources: [],
-    outputStrategy: 'post-200',
-    skipped: SPEC_SKIP,
+async function fetchSpec(_env: ProviderSecrets): Promise<SpecFetchResult> {
+  const { spec, url, hash } = await fetchOpenAiCompatibleSpec({
+    title: 'Vercel AI Gateway',
+    serverUrl: VERCEL_SERVER_URL,
+    // openai-chat-completions (chat, embeddings), responses, and
+    // image-generation ("Image-only models" use the Images endpoints).
+    include: [
+      '/chat/completions',
+      '/responses',
+      '/embeddings',
+      '/images/generations',
+      '/images/edits',
+    ],
   })
+  return {
+    specs: [spec],
+    sources: [{ url, hash }],
+    outputStrategy: 'post-200',
+  }
 }
 
 export const provider: ProviderConfig = {
@@ -501,8 +524,10 @@ export const provider: ProviderConfig = {
   displayName: 'Vercel AI Gateway',
   specSourceUrl: 'https://vercel.com/docs/ai-gateway',
   modelsEndpoint: VERCEL_MODELS_URL,
-  defaultDerivation: 'docs-derived',
+  defaultDerivation: 'generated',
+  connect: bearerConnect(VERCEL_SERVER_URL),
   fetchSpec,
   listModels,
-  classify: () => null,
+  classify: classifyOpenAiCompat,
+  generationEndpointId: ({ activity }) => compatGenerationEndpointId(activity),
 }

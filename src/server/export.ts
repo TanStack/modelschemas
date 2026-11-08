@@ -73,6 +73,8 @@ interface SchemaEntry {
   description: string | null
   input: SchemaVersionEntry | null
   output: SchemaVersionEntry | null
+  /** SSE event schema when `output` is the JSON success body. */
+  stream?: SchemaVersionEntry
 }
 
 /** Every endpoint of one provider with its current input and output. */
@@ -109,7 +111,7 @@ async function exportProviderSchemas(db: Db, providerId: string) {
     if (version) {
       // An interrupted sync can leave two current rows; picking one would
       // make the mirror flip between them, so the export refuses.
-      if (entry[version.kind]) {
+      if (version.kind === 'stream' ? entry.stream : entry[version.kind]) {
         throw new Error(
           `${endpoint.id} has more than one current ${version.kind} version`,
         )
@@ -118,12 +120,14 @@ async function exportProviderSchemas(db: Db, providerId: string) {
       if (!/^\s*\{[\s\S]*\}\s*$/.test(version.schema)) {
         throw new Error(`schema version ${version.id} is not a JSON object`)
       }
-      entry[version.kind] = {
+      const recorded = {
         contentHash: version.contentHash,
         specRevision: version.specRevision,
         provenance: schemaProvenance(version),
         schema: new RawJson(version.schema),
       }
+      if (version.kind === 'stream') entry.stream = recorded
+      else entry[version.kind] = recorded
     }
   }
   return [...byEndpoint.values()]

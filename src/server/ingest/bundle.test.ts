@@ -126,17 +126,93 @@ describe('extractEndpointSchemas', () => {
       '/v1/audio/transcriptions',
     )
     expect(result.input).toBeDefined()
+    expect(result.inputContentType).toBe('multipart/form-data')
     expect(
       (result.input!.properties as Record<string, Record<string, unknown>>).file
         ?.format,
     ).toBe('binary')
     expect(result.output).toBeDefined()
+    expect(result.outputContentTypes).toEqual(['application/json'])
   })
 
-  it('omits output for binary-media endpoints', () => {
+  it('omits output for binary-media endpoints and keeps the audio type', () => {
     const result = extractEndpointSchemas(fixtureSpec(), '/v1/audio/speech')
     expect(result.input).toBeDefined()
+    expect(result.inputContentType).toBe('application/json')
     expect(result.output).toBeUndefined()
+    expect(result.outputContentTypes).toEqual(['audio/mpeg'])
+  })
+
+  it('keeps JSON and stores the event-stream schema separately', () => {
+    const spec = structuredClone(fixtureSpec())
+    const post = spec.paths?.['/v1/messages']?.post as
+      | {
+          responses?: Record<string, { content?: Record<string, unknown> }>
+        }
+      | undefined
+    const ok = post?.responses?.['200']
+    const schemas = spec.components?.schemas
+    if (!ok?.content || !schemas)
+      throw new Error('fixture missing /v1/messages')
+    schemas.Chunk = {
+      type: 'object',
+      properties: { delta: { type: 'string' } },
+    }
+    ok.content['text/event-stream'] = {
+      schema: { $ref: '#/components/schemas/Chunk' },
+    }
+    const result = extractEndpointSchemas(spec, '/v1/messages')
+    expect(result.inputContentType).toBe('application/json')
+    expect(result.outputContentTypes).toEqual([
+      'application/json',
+      'text/event-stream',
+    ])
+    expect(result.output?.$defs).toBeDefined()
+    expect(result.streamOutput).toMatchObject({
+      type: 'object',
+      properties: { delta: { type: 'string' } },
+    })
+    expect(result.streamOutput?.$defs).toBeUndefined()
+  })
+
+  it('does not treat a boolean stream field as an event stream', () => {
+    const spec = structuredClone(fixtureSpec())
+    const create = spec.components?.schemas?.CreateMessage as
+      | { properties?: Record<string, unknown> }
+      | undefined
+    if (!create?.properties) throw new Error('fixture missing CreateMessage')
+    create.properties.stream = {
+      type: 'boolean',
+      description: 'Whether to stream the response using server-sent events.',
+    }
+    const result = extractEndpointSchemas(spec, '/v1/messages')
+    expect(result.outputContentTypes).toEqual(['application/json'])
+    expect(result.streamOutput).toBeUndefined()
+  })
+
+  it('keeps audio types beside an event stream when the success body is not JSON', () => {
+    const spec = structuredClone(fixtureSpec())
+    const post = spec.paths?.['/v1/audio/speech']?.post as
+      | {
+          responses?: Record<string, { content?: Record<string, unknown> }>
+        }
+      | undefined
+    const ok = post?.responses?.['200']
+    if (!ok) throw new Error('fixture missing speech')
+    ok.content = {
+      'application/octet-stream': { schema: { type: 'string' } },
+      'audio/mpeg': { schema: { type: 'string' } },
+      'text/event-stream': {
+        schema: { $ref: '#/components/schemas/Message' },
+      },
+    }
+    const result = extractEndpointSchemas(spec, '/v1/audio/speech')
+    expect(result.outputContentTypes).toEqual([
+      'application/octet-stream',
+      'audio/mpeg',
+      'text/event-stream',
+    ])
+    expect(result.output?.type).toBe('object')
   })
 
   it('uses the sibling GET for the sibling-get strategy', () => {
@@ -211,6 +287,28 @@ describe('bundleSchema', () => {
     // ...so the bundled $defs carries the ref's spelling, resolved via alias.
     const defs = schema.$defs as Record<string, unknown>
     expect(defs['Shared-2']).toBeDefined()
+    expect(findDanglingRefs(schema)).toEqual([])
+  })
+
+  it("keeps an inline schema's own $defs beside the component closure (Mistral speech stream)", () => {
+    const { schema, warnings } = bundleSchema(
+      {
+        type: 'object',
+        properties: {
+          event: { $ref: '#/$defs/EventTypes' },
+          data: { $ref: '#/components/schemas/Delta' },
+        },
+        $defs: { EventTypes: { type: 'string', enum: ['delta'] } },
+      },
+      { Delta: { type: 'object' } },
+      null,
+      'test',
+    )
+    expect(warnings).toEqual([])
+    expect(Object.keys(schema.$defs as object).sort()).toEqual([
+      'Delta',
+      'EventTypes',
+    ])
     expect(findDanglingRefs(schema)).toEqual([])
   })
 

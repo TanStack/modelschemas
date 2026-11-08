@@ -65,8 +65,10 @@ describe('mistral listModels', () => {
       if (href === MISTRAL_DEPRECATIONS_URL) {
         return Promise.resolve(new Response(MODELS_PAGE))
       }
+      // Docs stay off the network. A live pricing table plus one page
+      // per slug blows the 5s test limit once missing ids pull markdown.
       if (!href.startsWith('https://api.mistral.ai/')) {
-        return original(url, init)
+        return Promise.resolve(new Response('not found', { status: 404 }))
       }
       return Promise.resolve(
         new Response(
@@ -161,6 +163,8 @@ describe('mistral listModels modalities', () => {
         '- `mistral-small-latest`: Supports adjustable reasoning via the `reasoning_effort` parameter.',
       'https://docs.mistral.ai/models':
         '<a href="/models/not-a-listed-id">x</a>',
+      'https://docs.mistral.ai/models.md':
+        '| [Nope](/models/not-a-listed-id) | `not-a-listed-id` | GA |',
       'https://docs.mistral.ai/openapi.yaml': `components:
   schemas:
     ChatCompletionRequest:

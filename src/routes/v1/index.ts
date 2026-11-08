@@ -14,6 +14,9 @@ export const serviceIndex = {
     self: halGet('/v1'),
     status: halGet('/v1/status'),
     providers: halGet('/v1/providers'),
+    provider: halGet('/v1/providers/{provider}', {
+      example: '/v1/providers/anthropic',
+    }),
     models: halGet(
       '/v1/models{?activity,provider,capability,q,provenance,pricing}',
       {

@@ -55,7 +55,7 @@ const getCatalog = createServerFn({ method: 'GET' })
       await import('#/server/catalog.ts')
     const { FACT_KEYS, buildReport } = await import('#/lib/completeness.ts')
     const { sourceSilentLedger } = await import('#/server/source-silent.ts')
-    const db = getDb(env)
+    const db = getDb(env, { replica: true })
     // The second read carries full rate cards: the score reads them, and the
     // page shows the compact rows the API serves.
     const [result, scored, providers] = await Promise.all([
@@ -191,7 +191,7 @@ function ModelsCatalog() {
         <MetaStrip
           items={[
             ['count', String(data.count)],
-            ['cache', 'swr'],
+            ['cache', '15m'],
             ['shown', data.truncated ? `first ${String(MAX_ROWS)}` : 'all'],
           ]}
         />
