@@ -228,11 +228,15 @@ it('fails an input-modality statement it cannot read', async () => {
       'the request accepts text, images, and videos',
       'the request also accepts text, images, and videos',
     ),
+    noEffort.html.replace(
+      'the request accepts text, images, and videos.',
+      'the request accepts text with images and videos.',
+    ),
   ]) {
     expect(html).not.toBe(noEffort.html)
     serve({ [ANT_OPENAI]: html })
     await expect(provider.listModels(nativeEnv)).rejects.toThrow(
-      /unreadable native input modality smell|missing native multimodal applicability/,
+      /unreadable native input modality|missing native multimodal applicability/,
     )
   }
 })

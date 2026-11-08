@@ -166,7 +166,7 @@ export const provider: ProviderConfig = {
     const accepts = new Map(
       [
         ...text(fields.get('model') ?? '').matchAll(
-          /When using ([\w.-]+)\s*, the request (?:natively )?accepts ([^.]+?)(?: with [^.]+)?\./g,
+          /When using ([\w.-]+)\s*, the request (?:natively )?accepts ([^.]+?)(?: with native multimodal understanding)?\./g,
         ),
       ].map(([, id = '', list = '']) => [
         id,
