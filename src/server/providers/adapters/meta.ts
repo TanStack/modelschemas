@@ -10,6 +10,8 @@ import {
   tables,
   list,
   parseMetaModels,
+  metaChatFamilies,
+  metaFamilyUrl,
   parseMetaPricing,
   parseMetaSchemas,
   metaOperation,
@@ -48,7 +50,14 @@ export const provider: ProviderConfig = {
       load(META_PRICING, kv),
       load(META_REASONING, kv),
     ])
-    const models = parseMetaModels(catalog.html)
+    const pages = Object.fromEntries(
+      await Promise.all(
+        metaChatFamilies(catalog.html).map(
+          async (id) => [id, (await load(metaFamilyUrl(id), kv)).html] as const,
+        ),
+      ),
+    )
+    const models = parseMetaModels(catalog.html, pages)
     const source = {
       url: META_PRICING,
       hash: prices.hash,
