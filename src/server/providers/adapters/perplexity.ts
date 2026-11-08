@@ -222,7 +222,8 @@ export function parsePerplexityModelsPage(markdown: string): {
  * Flags the effort page (named "presets" before 2026-10-22) states in its
  * "current effort level values" accordions: each effort level names its
  * model, the `reasoning.effort` it sends, and its tools, except a level
- * that says it has no frozen configuration, which names none. A model a
+ * that says it has no frozen configuration, which states no Model bullet. The title
+ * separator is an em dash, or a colon (`ultra` since 2026-10-29). A model a
  * level runs with an effort takes `reasoning.effort`; one it runs with
  * tools takes `tools`. The page says nothing of `tool_choice`. A level's
  * fallback model gets no flags: the frozen request sends it the level's
@@ -231,7 +232,8 @@ export function parsePerplexityModelsPage(markdown: string): {
 export function parsePerplexityEffortLevels(markdown: string): StatedFlags {
   const stated: StatedFlags = new Map()
   // Each accordion is one `> [accordion] name — current effort level values`
-  // blockquote (the markdown export's shape since 2026-10-30), and they run
+  // blockquote (the markdown export's shape since 2026-10-30). `ultra`
+  // titles the same block with a colon and no space before it. They run
   // back to back up to the next unquoted `## ` heading (the prompts' own
   // `## ` headings stay inside the quote). Any other block in that run, or
   // a blank line splitting an accordion, throws.
@@ -241,7 +243,7 @@ export function parsePerplexityEffortLevels(markdown: string): StatedFlags {
   const run = start < 0 ? '' : (markdown.slice(start).split(/^## /m)[0] ?? '')
   for (const block of run === '' ? [] : run.trim().split(/\n\n+/)) {
     const [, level, quoted] =
-      /^> \[accordion\] ([^\s—]+) — current effort level values\n((?:>.*(?:\n|$))*)$/.exec(
+      /^> \[accordion\] ([^\s:—]+)(?: — |: )current effort level values\n((?:>.*(?:\n|$))*)$/.exec(
         block,
       ) ?? []
     if (level === undefined || quoted === undefined) {

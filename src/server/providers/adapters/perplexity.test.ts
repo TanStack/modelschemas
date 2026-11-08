@@ -374,6 +374,30 @@ describe('parsePerplexityEffortLevels', () => {
       ].join('\n'),
     )
 
+  // Served by 2026-11-08: `ultra` titles the accordion with a colon, and
+  // names the model it runs on in the no-frozen-configuration sentence.
+  const COLON_DOC = [
+    '## Current effort level values',
+    '',
+    '> [accordion] fast — current effort level values',
+    '>',
+    '> * **Models:** `openai/gpt-6-luna`, with `openai/gpt-5.6-luna` as the [fallback model](https://docs.perplexity.ai/docs/agent-api/model-fallback.md)',
+    '> * **Reasoning effort:** `none`',
+    '> * **Tools:** `web_search`',
+    '',
+    '> [accordion] ultra: current effort level values',
+    '>',
+    '> `ultra` has no frozen configuration. It runs on `anthropic/claude-opus-5-5`, and its settings are not all part of the documented request schema, so call it by name.',
+    '',
+    '## Next Steps',
+  ].join('\n')
+
+  it('reads a colon-titled accordion and skips a level that names a model only in its no-frozen-configuration sentence', () => {
+    expect([...parsePerplexityEffortLevels(COLON_DOC)]).toEqual([
+      ['openai/gpt-6-luna', ['reasoning', 'reasoning_effort', 'tools']],
+    ])
+  })
+
   it("reads the first of a level's models, and skips a level with no frozen configuration", () => {
     expect(FALLBACK_DOC.match(/\*\*Models:\*\*/g)).toHaveLength(2)
     expect(FALLBACK_DOC).toContain('ultra-preview')
