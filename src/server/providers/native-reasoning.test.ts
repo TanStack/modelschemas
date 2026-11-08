@@ -137,9 +137,7 @@ it('uses native Gemini model thinking evidence without a listing flag and binds 
   })
   expect(
     parsePageThinking(
-      docs[
-        'https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash.md.txt'
-      ] ?? '',
+      docs['https://aistudio.google.com/docs/models/gemini-3.8-flash.md'] ?? '',
     )?.efforts,
   ).toEqual(['low', 'medium', 'high'])
   expect(features('gemini-3.8-flash', false)).toMatchObject({

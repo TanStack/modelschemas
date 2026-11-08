@@ -19,13 +19,14 @@ import type {
 } from './types.ts'
 
 export const GEMINI_DEPRECATIONS_URL =
-  'https://ai.google.dev/gemini-api/docs/deprecations.md.txt'
+  'https://aistudio.google.com/docs/deprecations.md'
 
 export const GEMINI_CHANGELOG_URL =
-  'https://ai.google.dev/gemini-api/docs/changelog.md.txt'
+  'https://aistudio.google.com/docs/changelog.md'
 
+/** Served as HTML only: the `.md.txt` mirror is gone (issue #568). */
 export const GEMMA_MODEL_CARD_URL =
-  'https://ai.google.dev/gemma/docs/core/model_card_4.md.txt'
+  'https://ai.google.dev/gemma/docs/core/model_card_4'
 
 const CHANGELOG_MARK = 'This page documents updates to the Gemini API'
 
@@ -117,6 +118,27 @@ function cells(line: string): Array<string> {
     .split('|')
     .slice(1, -1)
     .map((cell) => cell.trim())
+}
+
+/** Each HTML `<table>` as `| a | b |` lines, one per `<tr>`. */
+export function htmlTables(html: string): string {
+  return html.replace(
+    /<table[^>]*>([\s\S]*?)<\/table>/g,
+    (_table, body: string) =>
+      `\n${[...body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)]
+        .map(
+          ([, row = '']) =>
+            `| ${[...row.matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)]
+              .map(([, cell = '']) =>
+                cell
+                  .replace(/<[^>]*>/g, '')
+                  .replace(/\s+/g, ' ')
+                  .trim(),
+              )
+              .join(' | ')} |`,
+        )
+        .join('\n')}\n`,
+  )
 }
 
 function gemmaId(header: string): string | null {
@@ -254,7 +276,9 @@ export async function geminiPublishedBindings(
           throw new Error('gemma model card: not the Gemma 4 card')
         }
         return {
-          modalities: Object.fromEntries(parseGemmaModalities(markdown)),
+          modalities: Object.fromEntries(
+            parseGemmaModalities(htmlTables(markdown)),
+          ),
           hash: await sha256Text(markdown),
         }
       }),
