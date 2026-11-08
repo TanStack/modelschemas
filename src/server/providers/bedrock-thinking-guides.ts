@@ -47,7 +47,11 @@ function models(text: string): Map<string, string> {
   }
   const result = new Map<string, string>()
   for (const row of table.slice(1)) {
-    const name = row[0]?.trim()
+    // The hosted table links each name to its model card. The label is the
+    // name the effort rows use; anything else stays fail-closed.
+    const name = row[0]
+      ?.trim()
+      .replace(/^\[([^\]]+)\]\([^)\s]+\)$/, (_, label: string) => label.trim())
     const id = row[1]?.match(/^`(anthropic\.[a-z0-9.:-]+)`$/)?.[1]
     if (!name || !id || row.length !== 2 || result.has(name)) {
       throw new Error(
@@ -129,7 +133,9 @@ export function parseBedrockAdaptiveThinking(
   )
   const seen = new Set<string>()
   for (const row of table.slice(1)) {
-    const level = row[0]?.match(/^([a-z][a-z0-9_-]*)(?: \(default\))?$/)?.[1]
+    const level = row[0]?.match(
+      /^([a-z][a-z0-9_-]*)(?: \(default(?: [^)]+)?\))?$/,
+    )?.[1]
     const description = row[1]
     if (!level || !description || row.length !== 2 || seen.has(level))
       throw new Error('amazon-bedrock adaptive thinking: unreadable effort row')
@@ -145,9 +151,10 @@ export function parseBedrockAdaptiveThinking(
       throw new Error(
         `amazon-bedrock adaptive thinking: unsupported named scope for ${level}`,
       )
-    const scoped = /\bonly\b|\bsupport(?:s)?\b|unsupported models/.test(
-      description,
-    )
+    const scoped =
+      /\bonly\b|\bsupports?\b|\bsupported\b|unsupported models/i.test(
+        description,
+      )
     if (scoped && !named.length)
       throw new Error(
         `amazon-bedrock adaptive thinking: unreadable model scope for ${level}`,

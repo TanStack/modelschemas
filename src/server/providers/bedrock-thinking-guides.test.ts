@@ -224,6 +224,28 @@ describe('AWS native thinking guides', () => {
       parseBedrockAdaptiveThinking(adaptive),
     )
   })
+  it('reads max from linked model-card names and a default-on parenthetical', () => {
+    const linked = adaptive
+      .replace(
+        /^\| (Claude [^|]+) \|/gm,
+        '| [$1](model-card-anthropic-claude-example.md) |',
+      )
+      .replace(
+        '| max | Claude always thinks with no constraints on thinking depth. Claude Opus 4.6, Claude Sonnet 4.6, Claude Opus 5, and Claude Haiku 5.5 support max. Requests using max on unsupported models return an error. |',
+        '| max | Claude thinks the most readily. Supported on Claude Opus 5, Claude Opus 4.6, and Claude Sonnet 4.6. |',
+      )
+      .replace('| high (default) |', '| high (default on most models) |')
+      .replace(
+        '| medium |',
+        '| medium (default on Claude Opus 5.5 and Claude Haiku 5.5) |',
+      )
+    const controls = parseBedrockAdaptiveThinking(linked)
+    expect(controls['anthropic.claude-opus-5']?.efforts).toContain('max')
+    expect(controls['anthropic.claude-sonnet-4-6']?.efforts).toContain('max')
+    expect(controls['anthropic.claude-opus-5-5']?.efforts).not.toContain('max')
+    expect(controls['anthropic.claude-opus-5-5']?.efforts).toContain('medium')
+    expect(controls['anthropic.claude-haiku-5-5']?.efforts).toContain('high')
+  })
   it('rejects missing tables, malformed native rows and unreadable restricted model scopes', () => {
     expect(() =>
       parseBedrockAdaptiveThinking(
