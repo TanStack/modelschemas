@@ -249,6 +249,121 @@ describe('parseLlmGatewayModels', () => {
   })
 })
 
+describe('route price shapes (2026-11-04 listing, #580)', () => {
+  /** Excerpt of https://api.llmgateway.io/v1/models (2026-11-08). */
+  const [qwen] = parseLlmGatewayModels(
+    {
+      data: [
+        {
+          id: 'qwen-plus',
+          architecture: {
+            input_modalities: ['text'],
+            output_modalities: ['text'],
+          },
+          providers: [
+            {
+              providerId: 'alibaba',
+              externalId: 'qwen-plus',
+              pricing: {
+                prompt: '0.4e-6',
+                completion: '1.2e-6',
+                image: '0',
+                request: '0',
+                input_cache_read: '0.08e-6',
+                input_cache_read_explicit: '0.04e-6',
+                input_cache_write: '0.5e-6',
+                input_cache_write_1h: '0',
+                web_search: '0.01',
+                content_filter: '0.05',
+                tiers: [
+                  {
+                    name: 'Up to 256K',
+                    up_to_tokens: 256000,
+                    prompt: '0.4e-6',
+                    completion: '1.2e-6',
+                  },
+                  {
+                    name: 'Over 256K',
+                    up_to_tokens: null,
+                    prompt: '1.2e-6',
+                    completion: '3.6e-6',
+                    input_cache_read_explicit: '0.12e-6',
+                  },
+                ],
+              },
+            },
+          ],
+          supported_parameters: [],
+        },
+      ],
+    },
+    SOURCE,
+  )
+  const card = qwen?.pricing as RateCard
+
+  it('bills web search, content filter and explicit cache reads', () => {
+    expect(
+      price(
+        card,
+        {},
+        {
+          input_tokens: 0,
+          output_tokens: 0,
+          web_searches: 2,
+          content_filtered_requests: 1,
+          explicit_cache_read_tokens: 100_000,
+        },
+      ),
+    ).toBeCloseTo(0.02 + 0.05 + 0.004)
+  })
+
+  it('picks the band whose up_to_tokens covers the prompt', () => {
+    const at = (input_tokens: number, explicit = 0) =>
+      price(
+        card,
+        {},
+        {
+          input_tokens,
+          output_tokens: 1_000_000,
+          explicit_cache_read_tokens: explicit,
+        },
+      )
+    expect(at(256_000)).toBeCloseTo(0.1024 + 1.2)
+    expect(at(256_001)).toBeCloseTo(256_001 * 1.2e-6 + 3.6)
+    // Explicit cache reads count toward the prompt size, as in costs.ts.
+    expect(at(1, 256_000)).toBeCloseTo(1.2e-6 + 3.6 + 256_000 * 0.12e-6)
+  })
+
+  it('refuses a band list it cannot read', () => {
+    const [bad] = parseLlmGatewayModels(
+      {
+        data: [
+          {
+            id: 'x',
+            architecture: {
+              input_modalities: ['text'],
+              output_modalities: ['text'],
+            },
+            providers: [
+              {
+                providerId: 'p',
+                externalId: 'x',
+                pricing: {
+                  prompt: '1e-6',
+                  completion: '1e-6',
+                  tiers: [{ up_to_tokens: 1000, prompt: '1e-6' }],
+                },
+              },
+            ],
+          },
+        ],
+      },
+      SOURCE,
+    )
+    expect(bad?.pricing).toBeNull()
+  })
+})
+
 describe('provider', () => {
   it('classifies the gateway routes from openapi.json', () => {
     expect(provider.classify('/v1/chat/completions', {})).toBe('chat')

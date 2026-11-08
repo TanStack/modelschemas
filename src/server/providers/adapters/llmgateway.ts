@@ -14,8 +14,8 @@
  * Upstream links come from the route's own `providerId` + `externalId`,
  * never from `family`. A bare id with several routes has no single upstream.
  */
-import { compileOpenRouterPricing } from '@modelschemas/rate-card'
-import type { RateCard } from '@modelschemas/rate-card'
+import { compileTokenCard } from '@modelschemas/rate-card'
+import type { RateCard, TokenRateTier } from '@modelschemas/rate-card'
 
 import type { Activity } from '#/db/schema.ts'
 import { pricingRange } from '#/server/rate-card.ts'
@@ -59,18 +59,27 @@ const PARAMETER_FLAGS: Record<string, string> = {
 }
 
 /**
- * Price keys whose meaning matches the OpenRouter-style token listing.
- * A route quoting any other key (`image`, audio, `per_second`, `ocr_page`)
- * gets no card rather than a guessed one.
+ * Route price key → the usage lever it prices. Counts are disjoint, as in
+ * the gateway's own cost code (`packages/actions/src/costs.ts`):
+ * `input_cache_read_explicit` replaces the cache read rate when the request
+ * used `cache_control`, `content_filter` is xAI's flat fee per blocked
+ * request. A route quoting any other key (`image`, audio, `per_second`,
+ * `peak`, `discount`) gets no card rather than a guessed one.
  */
-const TOKEN_PRICE_KEYS = new Set([
-  'prompt',
-  'completion',
-  'input_cache_read',
-  'input_cache_write',
-  'input_cache_write_1h',
-  'request',
-])
+const LEVERS: Record<string, string> = {
+  prompt: 'input_tokens',
+  completion: 'output_tokens',
+  input_cache_read: 'cache_read_tokens',
+  input_cache_read_explicit: 'explicit_cache_read_tokens',
+  input_cache_write: 'cache_write_tokens',
+  input_cache_write_1h: 'cache_write_1h_tokens',
+  web_search: 'web_searches',
+  content_filter: 'content_filtered_requests',
+  request: 'requests',
+}
+
+/** Levers the gateway counts in the prompt size that picks a tier. */
+const EXTRA_PROMPT_LEVERS = ['explicit_cache_read_tokens']
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -121,31 +130,81 @@ function endpointFor(
   }
 }
 
-/**
- * The route's token prices with zero entries dropped, or null when the
- * route quotes nothing or a key this does not read.
- */
-function tokenPrices(pricing: unknown): Record<string, number> | null {
-  if (!isRecord(pricing)) return null
-  const out: Record<string, number> = {}
-  for (const [key, value] of Object.entries(pricing)) {
-    const n = typeof value === 'string' ? Number(value) : NaN
-    if (!Number.isFinite(n) || n < 0) return null
-    if (n === 0) continue
-    if (!TOKEN_PRICE_KEYS.has(key)) return null
-    out[key] = n
-  }
-  return 'prompt' in out || 'completion' in out ? out : null
+interface RoutePrices {
+  base: Record<string, number>
+  tiers: Array<TokenRateTier>
 }
 
-function samePrices(
-  a: Record<string, number>,
-  b: Record<string, number>,
-): boolean {
-  const keys = Object.keys(a)
-  return (
-    keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
-  )
+/**
+ * Lever rates of one price object, or null when it quotes a key this does
+ * not read. `skip` keys are read by the caller. The base drops zeros (an
+ * unpriced lever); a band keeps them, since a band's 0 overrides the base.
+ */
+function leverRates(
+  pricing: Record<string, unknown>,
+  skip: ReadonlySet<string>,
+  dropZeros: boolean,
+): Record<string, number> | null {
+  const out: Record<string, number> = {}
+  for (const [key, value] of Object.entries(pricing)) {
+    if (skip.has(key)) continue
+    const n = typeof value === 'string' ? Number(value) : NaN
+    if (!Number.isFinite(n) || n < 0) return null
+    if (n === 0 && dropZeros) continue
+    const lever = LEVERS[key]
+    if (!lever) return null
+    out[lever] = n
+  }
+  return out
+}
+
+const TIER_META = new Set(['name', 'up_to_tokens'])
+
+/**
+ * The route's token prices, or null when the route quotes nothing or a key
+ * this does not read. `tiers` are context-length bands: the gateway bills
+ * a request at the first band whose `up_to_tokens` is at or above its
+ * prompt tokens (`costs.ts`), so band N applies above band N-1's bound. A
+ * band leaves out a rate it keeps from the base.
+ */
+function routePrices(pricing: unknown): RoutePrices | null {
+  if (!isRecord(pricing)) return null
+  const base = leverRates(pricing, new Set(['tiers']), true)
+  if (!base || !('input_tokens' in base || 'output_tokens' in base)) {
+    return null
+  }
+  const bands = pricing.tiers ?? []
+  if (!Array.isArray(bands)) return null
+  const tiers: Array<TokenRateTier> = []
+  for (const [i, band] of bands.entries()) {
+    if (!isRecord(band)) return null
+    const rates = leverRates(band, TIER_META, false)
+    if (!rates) return null
+    const last = i === bands.length - 1
+    const bound = band.up_to_tokens
+    if (last ? bound !== null : typeof bound !== 'number') return null
+    if (i === 0) continue
+    const below: unknown = (bands[i - 1] as Record<string, unknown>)
+      .up_to_tokens
+    if (typeof below !== 'number') return null
+    tiers.push({ minPromptTokens: below, rates })
+  }
+  return { base, tiers }
+}
+
+function samePrices(a: RoutePrices, b: RoutePrices): boolean {
+  return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b))
+}
+
+function sorted(prices: RoutePrices): unknown {
+  const keys = (rates: Record<string, number>) =>
+    Object.fromEntries(
+      Object.entries(rates).sort(([x], [y]) => x.localeCompare(y)),
+    )
+  return {
+    base: keys(prices.base),
+    tiers: prices.tiers.map((t) => [t.minPromptTokens, keys(t.rates)]),
+  }
 }
 
 /**
@@ -286,8 +345,12 @@ export function parseLlmGatewayModels(
     const name = typeof row.name === 'string' ? row.name : null
 
     const routeFacts = routes.map((route) => {
-      const prices = tokenPrices(route.row.pricing)
-      const card = prices ? compileOpenRouterPricing(prices, source) : null
+      const prices = routePrices(route.row.pricing)
+      const card = prices
+        ? compileTokenCard(prices.base, prices.tiers, source, {
+            extraPromptLevers: EXTRA_PROMPT_LEVERS,
+          })
+        : null
       return { route, prices, card, reasoning: routeReasoning(route.row) }
     })
 
