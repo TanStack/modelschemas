@@ -209,6 +209,18 @@ it('reads a reference that dropped reasoning_effort with Ring as no effort model
     output: ['text'],
   })
 })
+it('reads a "natively accepts ... with native multimodal understanding" statement', async () => {
+  const html = noEffort.html.replace(
+    'the request accepts text, images, and videos.',
+    'the request natively accepts text, images, and videos with native multimodal understanding.',
+  )
+  expect(html).not.toBe(noEffort.html)
+  serve({ [ANT_OPENAI]: html })
+  const { models } = await provider.listModels(nativeEnv)
+  expect(
+    models.find((m) => m.rawId === 'Ling-3.0-flash-VL')?.modalities,
+  ).toEqual({ input: ['text', 'image', 'video'], output: ['text'] })
+})
 it('fails an input-modality statement it cannot read', async () => {
   for (const html of [
     noEffort.html.replace('accepts text and audio', 'accepts text and smell'),
@@ -216,11 +228,15 @@ it('fails an input-modality statement it cannot read', async () => {
       'the request accepts text, images, and videos',
       'the request also accepts text, images, and videos',
     ),
+    noEffort.html.replace(
+      'the request accepts text, images, and videos.',
+      'the request accepts text with images and videos.',
+    ),
   ]) {
     expect(html).not.toBe(noEffort.html)
     serve({ [ANT_OPENAI]: html })
     await expect(provider.listModels(nativeEnv)).rejects.toThrow(
-      /unreadable native input modality smell|missing native multimodal applicability/,
+      /unreadable native input modality|missing native multimodal applicability/,
     )
   }
 })

@@ -161,11 +161,12 @@ export const provider: ProviderConfig = {
     const nativeEndpointId = nativePaths[0].replace(/^\//, '')
     const apiOverview = text(article(overview.html))
     // "When using <id>, the request accepts text, images, and videos." — one
-    // statement per model that takes more than text.
+    // statement per model that takes more than text. Since 2026-10-27 a model
+    // may read "natively accepts <list> with native multimodal understanding."
     const accepts = new Map(
       [
         ...text(fields.get('model') ?? '').matchAll(
-          /When using ([\w.-]+)\s*, the request accepts ([^.]+)\./g,
+          /When using ([\w.-]+)\s*, the request (?:natively )?accepts ([^.]+?)(?: with native multimodal understanding)?\./g,
         ),
       ].map(([, id = '', list = '']) => [
         id,
