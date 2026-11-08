@@ -48,6 +48,8 @@ spec syncs daily. Responses are JSON unless noted (\`text/typescript\`,
 
 1. GET /v1 — endpoint index.
 2. GET /v1/models?activity=chat — cross-provider catalog of chat models.
+   GET /v1/providers/{provider} — one provider's status, counts, and live
+   models per activity.
 3. GET /v1/schemas — system-wide index: every provider's activities and
    endpoint ids in one response (all schemas on the system).
 4. GET /v1/schemas/anthropic — activities + endpoint ids for one provider.
@@ -56,8 +58,12 @@ spec syncs daily. Responses are JSON unless noted (\`text/typescript\`,
    Grain=provider models also accept the raw id:
    \`/v1/schemas/grok/image/grok-imagine-image-2.0?kind=input\`.
 6. GET /v1/openapi/{provider} — generation-only OpenAPI (servers, auth,
-   paths). FAL requires ?model=. Over 40 endpoints, or a filter that
-   matches none: 400 spec_requires_selector. HTTP only (no MCP tool).
+   paths). FAL is one queue document: the model id is the endpoint_id path
+   parameter (x-modelschemas-encode: raw — do not percent-encode slashes).
+   Bare, the bodies are untyped; ?activity= inlines each model's own body
+   schema (up to 1024 models); ?model= is that one model's paths. A filter
+   that matches none: 400
+   spec_requires_selector. HTTP only (no MCP tool).
 7. POST /v1/validate {"provider","endpointId","payload"} — check a payload.
 8. POST /v1/estimate {"provider","model","request"?,"usage"?} — {amount,
    currency} for a call from the stored rate card. Missing levers → 422;
@@ -94,9 +100,15 @@ rate-limit token.
 
 ## Caching
 
-Read responses carry ETag (content hash), Last-Modified, Cache-Control with
-stale-while-revalidate, X-Fetched-At and X-Stale-At (unix epoch seconds).
-Send If-None-Match to get 304s.
+Catalog and current schema reads (\`/v1/models\`, \`/v1/providers\`, \`/v1/schemas\`,
+\`/v1/openapi/{provider}\`) send \`Cache-Control: public, max-age=900\` (the
+15-minute model poll) and are edge-cached. A schema read with
+\`?version=<content hash>\` is immutable and cached for a year. Responses also
+carry ETag (content hash), Last-Modified, X-Fetched-At and X-Stale-At (unix
+epoch seconds). Send If-None-Match to get 304s. \`/v1/changes\` and
+\`/v1/status\` are not edge-cached. A response served from the edge does not
+run the worker, so it does not count toward the rate limit, with or without
+Authorization. Only cache misses are counted.
 
 ## Auth (optional — unlocks higher rate limits + webhooks)
 

@@ -33,4 +33,4 @@ Output of `pull` is committed; `verify` proves the service still serves
 bytes matching each pinned content hash.
 
 Docs: [modelschemas.com/docs](https://modelschemas.com/docs) · Source:
-[github.com/modelschemas/modelschemas](https://github.com/modelschemas/modelschemas)
+[github.com/TanStack/modelschemas](https://github.com/TanStack/modelschemas)

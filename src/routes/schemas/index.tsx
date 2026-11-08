@@ -34,7 +34,7 @@ const getSchemaIndex = createServerFn({ method: 'GET' }).handler(
     const { env } = await import('cloudflare:workers')
     const { getDb } = await import('#/db/index.ts')
     const { getSystemSchemaIndex } = await import('#/server/schemas-api.ts')
-    const index = await getSystemSchemaIndex(getDb(env))
+    const index = await getSystemSchemaIndex(getDb(env, { replica: true }))
     return { count: index.count, providers: index.providers }
   },
 )
@@ -142,7 +142,7 @@ function SchemaIndex() {
           items={[
             ['schemas', String(data.count)],
             ['providers', String(data.providers.length)],
-            ['cache', 'swr'],
+            ['cache', '15m'],
           ]}
         />
 

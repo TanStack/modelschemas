@@ -14,7 +14,7 @@ import {
   providers,
   schemaVersions,
 } from '../../db/schema.ts'
-import { getByHash } from '../kv.ts'
+
 import type { OpenApiDocument, ProviderConfig } from '../providers/types.ts'
 import { EXTRACTOR_VERSION } from './bundle.ts'
 import { MODELS_DEV_API_URL } from './retire-models-dev.ts'
@@ -156,7 +156,7 @@ describe('syncProvider', () => {
     const deps = await freshDeps(id)
     const db = deps.db
 
-    // First run: endpoint + input/output versions inserted, KV warmed.
+    // First run: endpoint + input/output versions inserted.
     const first = await syncProvider(deps, stubProvider(id, fixtureSpec(false)))
     expect(first.error).toBeUndefined()
     expect(first.endpointsSeen).toBe(1) // admin endpoint classified to null
@@ -166,6 +166,8 @@ describe('syncProvider', () => {
     expect(endpointRows).toHaveLength(1)
     expect(endpointRows[0]?.id).toBe(`${id}/v1/messages`)
     expect(endpointRows[0]?.activity).toBe('chat')
+    expect(endpointRows[0]?.requestContentType).toBeNull()
+    expect(endpointRows[0]?.responseContentTypes).toBeNull()
 
     const firstChanges = await providerChanges(db, id)
     expect(firstChanges.map((c) => c.type).sort()).toEqual([
@@ -180,9 +182,10 @@ describe('syncProvider', () => {
       .where(eq(schemaVersions.endpointId, `${id}/v1/messages`))
     expect(versions).toHaveLength(2)
     const inputVersion = versions.find((v) => v.kind === 'input')
-    expect(
-      await getByHash(env.SCHEMA_CACHE, inputVersion?.contentHash ?? ''),
-    ).toEqual({ type: 'object', properties: { model: { type: 'string' } } })
+    expect(JSON.parse(inputVersion?.schema ?? 'null')).toEqual({
+      type: 'object',
+      properties: { model: { type: 'string' } },
+    })
     // Provenance is recorded on every version.
     expect(inputVersion?.sourceUrl).toBe(STUB_SOURCE.url)
     expect(inputVersion?.sourceHash).toBe(STUB_SOURCE.hash)
@@ -229,6 +232,54 @@ describe('syncProvider', () => {
     expect(inputVersions.filter((v) => v.supersededAt === null)).toHaveLength(1)
     const payload = updated[0]?.payload as { previousHash: string }
     expect(payload.previousHash).toBe(inputVersion?.contentHash)
+  })
+
+  it('records a stream media type without a new schema version on resync', async () => {
+    const id = 'stub-stream-media'
+    const deps = await freshDeps(id)
+    const spec = fixtureSpec(false)
+    const post = spec.paths?.['/v1/messages']?.post as
+      | {
+          responses?: Record<string, { content?: Record<string, unknown> }>
+        }
+      | undefined
+    const ok = post?.responses?.['200']
+    const message = ok?.content?.['application/json']
+    const create = spec.components?.schemas?.CreateMessage as
+      | { properties?: Record<string, unknown> }
+      | undefined
+    if (!ok?.content || message === undefined || !create?.properties) {
+      throw new Error('fixture missing message operation')
+    }
+    ok.content['text/event-stream'] = message
+    create.properties.stream = { type: 'boolean' }
+
+    const first = await syncProvider(deps, stubProvider(id, spec))
+    expect(first.error).toBeUndefined()
+    expect(first.versionsAdded).toBe(3)
+    const row = (await providerEndpoints(deps.db, id))[0]
+    expect(row?.requestContentType).toBeNull()
+    expect(row?.responseContentTypes).toEqual([
+      'application/json',
+      'text/event-stream',
+    ])
+    const versions = await deps.db
+      .select()
+      .from(schemaVersions)
+      .where(eq(schemaVersions.endpointId, row?.id ?? ''))
+    expect(versions.map((version) => version.kind).sort()).toEqual([
+      'input',
+      'output',
+      'stream',
+    ])
+    expect(first.changesWritten).toBe(3)
+
+    const second = await syncProvider(deps, stubProvider(id, spec))
+    expect(second.versionsAdded).toBe(0)
+    expect(second.changesWritten).toBe(0)
+    expect(
+      (await providerEndpoints(deps.db, id))[0]?.responseContentTypes,
+    ).toEqual(['application/json', 'text/event-stream'])
   })
 
   it.each([

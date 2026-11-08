@@ -1,4 +1,5 @@
 import { price } from '@modelschemas/rate-card'
+import type { RateCard } from '@modelschemas/rate-card'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -15,6 +16,8 @@ import {
   mistralModelPricing,
   mistralRateCard,
   parseMistralApiIds,
+  parseMistralApiSlugs,
+  parseMistralMarkdownPrice,
   parseMistralModelIndex,
   parseMistralPageMaxOutput,
   parseMistralPageFeatures,
@@ -647,6 +650,204 @@ describe('mistral model page price and max output', () => {
     expect(mistralIndexSlugFor('zai-glm-5-2', set)).toBe('zai-glm-5-2')
     expect(mistralIndexSlugFor('mistral-medium-2604', set)).toBeNull()
     expect(mistralIndexSlugFor('magistral-medium-latest', set)).toBeNull()
+  })
+
+  it('reads the markdown Pricing line the HTML widget no longer shows', () => {
+    expect(
+      parseMistralMarkdownPrice(
+        '- Pricing: Input $1.5 /M Tokens; Output $7.5 /M Tokens\n',
+      ),
+    ).toEqual({
+      kind: 'tokens',
+      rates: { input_tokens: 1.5 / 1e6, output_tokens: 7.5 / 1e6 },
+    })
+    expect(
+      parseMistralMarkdownPrice(
+        '- Pricing: Input $0.7 /M Tokens; Cached input $0.07 /M Tokens; Output $2.1 /M Tokens',
+      ),
+    ).toEqual({
+      kind: 'tokens',
+      rates: {
+        input_tokens: 0.7 / 1e6,
+        cache_read_tokens: 0.07 / 1e6,
+        output_tokens: 2.1 / 1e6,
+      },
+    })
+    expect(parseMistralMarkdownPrice('- Pricing: Input $0.003 /Min')).toEqual({
+      kind: 'unit',
+      meters: [{ param: 'audio_minutes', rate: 0.003 }],
+    })
+    const pages = parseMistralMarkdownPrice(
+      '- Pricing: Input $4 /1000 Pages; Input $5 /1000 Annotated Pages',
+    )
+    expect(pages?.kind).toBe('unit')
+    if (pages?.kind !== 'unit') return
+    expect(pages.meters.map((meter) => meter.param)).toEqual([
+      'pages',
+      'annotated_pages',
+    ])
+    expect(
+      parseMistralMarkdownPrice(
+        '- Pricing: Free; Input $0 /M Tokens; Output $0 /M Tokens',
+      ),
+    ).toBeNull()
+    expect(
+      parseMistralMarkdownPrice('# Model\n- Status: Deprecated'),
+    ).toBeNull()
+    expect(() =>
+      parseMistralMarkdownPrice('- Pricing: Input $1 /request'),
+    ).toThrow(/unknown denominator/)
+  })
+
+  it('pairs one overview API name with one slug and drops a name used twice', () => {
+    const slugs = parseMistralApiSlugs(`
+| [Medium 3.5](/models/mistral-medium-3-5-26-04) | \`mistral-medium-3-5\` | Deprecated | 256k | x | 2026-10-31 | 2027-04-30 | [Large 4](/models/mistral-large-4-0) |
+| [Large 3](/models/mistral-large-3-25-12) | \`mistral-large-2512\` | Deprecated |
+| [Seven](/models/mistral-7b-0-3) | \`open-mistral-7b\` | Retired |
+| [Seven older](/models/mistral-7b-0-2) | \`open-mistral-7b\` | Retired |
+| [Next](/models/mistral-next) |  | Retired |
+`)
+    expect(slugs.get('mistral-medium-3-5')).toBe('mistral-medium-3-5-26-04')
+    expect(slugs.get('mistral-large-2512')).toBe('mistral-large-3-25-12')
+    expect(slugs.has('open-mistral-7b')).toBe(false)
+    expect(slugs.has('mistral-large-4')).toBe(false)
+    expect(() => parseMistralApiSlugs('| no ids |')).toThrow(
+      /parsed 0 API slugs/,
+    )
+  })
+
+  it('prices a dropped row from the model page markdown', async () => {
+    const original = globalThis.fetch
+    const docs: Record<string, string> = {
+      'https://docs.mistral.ai/inference/pricing': `<h2>Flagship models</h2>
+<p>Prices /M Tokens</p>
+<table>
+<tr><td><a href="/models/mistral-small-4-0-26-03">Small</a></td><td>$0.15</td><td>—</td><td>$0.6</td></tr>
+</table>`,
+      'https://docs.mistral.ai/resources/changelogs': '',
+      'https://docs.mistral.ai/models.md':
+        '| [Medium 3.5](/models/mistral-medium-3-5-26-04) | `mistral-medium-3-5` | Deprecated |',
+      'https://docs.mistral.ai/models':
+        '<a href="/models/not-a-listed-id">x</a>',
+      'https://docs.mistral.ai/models/mistral-small-4-0-26-03':
+        mistralModelPage(
+          ['mistral-small-2603'],
+          [[tip('Text input'), tip('Text output')]],
+        ),
+      'https://docs.mistral.ai/models/mistral-medium-3-5-26-04':
+        mistralModelPage(
+          ['mistral-medium-3-5', 'mistral-medium-latest'],
+          [[tip('Text input'), tip('Text output')]],
+        ),
+      'https://docs.mistral.ai/models/mistral-medium-3-5-26-04.md':
+        '- Pricing: Input $1.5 /M Tokens; Output $7.5 /M Tokens\n',
+      'https://docs.mistral.ai/studio/agents/agent-tools/websearch.md':
+        MISTRAL_WEBSEARCH_GUIDE,
+    }
+    globalThis.fetch = ((url: string) => {
+      const body = docs[String(url)]
+      return Promise.resolve(
+        body === undefined
+          ? new Response('missing', { status: 404 })
+          : new Response(body),
+      )
+    }) as typeof fetch
+    try {
+      const lookup = await mistralModelPricing(undefined, [
+        'mistral-small-2603',
+        'mistral-medium-3-5',
+        'mistral-medium-latest',
+        'mistral-medium',
+      ])
+      const medium = lookup('mistral-medium-3-5')
+      const card = medium.pricing
+      if (!card) throw new Error('expected a medium card')
+      expect(
+        price(
+          card as RateCard,
+          {},
+          {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+          },
+        ),
+      ).toBeCloseTo(9, 6)
+      expect(medium.factSources?.pricing).toMatchObject({
+        sourceUrl: 'https://docs.mistral.ai/models/mistral-medium-3-5-26-04.md',
+      })
+      expect(lookup('mistral-medium-latest').pricing).toEqual(card)
+      expect(lookup.seen.has('mistral-medium-3-5')).toBe(true)
+      expect(lookup.seen.has('mistral-medium-latest')).toBe(true)
+      // A listing alias the page does not name stays out of `seen`.
+      expect(lookup.seen.has('mistral-medium')).toBe(false)
+      expect(lookup('mistral-small-2603').factSources?.pricing?.sourceUrl).toBe(
+        'https://docs.mistral.ai/inference/pricing',
+      )
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  it('keeps the card when the markdown twin 404s and clears a page that states no price', async () => {
+    const original = globalThis.fetch
+    const docs: Record<string, string> = {
+      'https://docs.mistral.ai/inference/pricing': `<h2>Flagship models</h2>
+<p>Prices /M Tokens</p>
+<table>
+<tr><td><a href="/models/mistral-small-4-0-26-03">Small</a></td><td>$0.15</td><td>—</td><td>$0.6</td></tr>
+</table>`,
+      'https://docs.mistral.ai/resources/changelogs': '',
+      'https://docs.mistral.ai/models.md': `| [TTS](/models/voxtral-tts-26-03) | \`voxtral-mini-tts-2603\` | Deprecated |
+| [Leanstral](/models/leanstral-1-5) | \`labs-leanstral-1-5\` | Deprecated |`,
+      'https://docs.mistral.ai/models':
+        '<a href="/models/not-a-listed-id">x</a>',
+      'https://docs.mistral.ai/models/mistral-small-4-0-26-03':
+        mistralModelPage(
+          ['mistral-small-2603'],
+          [[tip('Text input'), tip('Text output')]],
+        ),
+      'https://docs.mistral.ai/models/voxtral-tts-26-03': mistralModelPage(
+        ['voxtral-mini-tts-2603'],
+        [[tip('Text input'), tip('Text output')]],
+      ),
+      'https://docs.mistral.ai/models/leanstral-1-5': mistralModelPage(
+        ['labs-leanstral-1-5'],
+        [[tip('Text input'), tip('Text output')]],
+      ),
+      'https://docs.mistral.ai/models/leanstral-1-5.md':
+        '- Pricing: Free; Input $0 /M Tokens; Output $0 /M Tokens\n',
+      'https://docs.mistral.ai/studio/agents/agent-tools/websearch.md':
+        MISTRAL_WEBSEARCH_GUIDE,
+    }
+    globalThis.fetch = ((url: string) => {
+      const body = docs[String(url)]
+      return Promise.resolve(
+        body === undefined
+          ? new Response('missing', { status: 404 })
+          : new Response(body),
+      )
+    }) as typeof fetch
+    try {
+      const lookup = await mistralModelPricing(undefined, [
+        'mistral-small-2603',
+        'voxtral-mini-tts-2603',
+        'labs-leanstral-1-5',
+      ])
+      expect(lookup.seen.has('voxtral-mini-tts-2603')).toBe(false)
+      expect(lookup('voxtral-mini-tts-2603').pricing).toBeUndefined()
+      expect(lookup('voxtral-mini-tts-2603').absent).toEqual({
+        pricing: 'unavailable',
+      })
+      expect(lookup('voxtral-mini-tts-2603').modalities).toEqual({
+        input: ['text'],
+        output: ['text'],
+      })
+      expect(lookup.seen.has('labs-leanstral-1-5')).toBe(true)
+      expect(lookup('labs-leanstral-1-5').pricing).toBeUndefined()
+      expect(lookup('labs-leanstral-1-5').absent).toBeUndefined()
+    } finally {
+      globalThis.fetch = original
+    }
   })
 })
 

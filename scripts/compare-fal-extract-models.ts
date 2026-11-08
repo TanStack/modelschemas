@@ -13,7 +13,6 @@
  * A fixture matches when the extracted card reproduces every one of the
  * fixture's examples within 1%.
  */
-import { execFileSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 
 import { price } from '../packages/rate-card/src/evaluate.ts'
@@ -40,7 +39,7 @@ import {
 } from '../src/server/ingest/extract-fal-pricing.ts'
 import type { ExtractChat } from '../src/server/ingest/extract-fal-pricing.ts'
 import { priceFalNamedSection } from '../src/server/ingest/fal-unit-rate.ts'
-import { requestSchemaPropertyNames } from '../src/server/providers/fact-sources.ts'
+import { falModels, requestPropertiesOf, secret } from './fal-models.ts'
 
 interface Candidate {
   model: Parameters<typeof gatewayChat>[2] & string
@@ -53,16 +52,6 @@ const CANDIDATES: Array<Candidate> = [
   { model: 'claude-sonnet-5-5', input: 2, output: 10 },
   { model: 'claude-haiku-5-5', input: 0.1, output: 0.5 },
 ]
-
-function secret(name: string): string {
-  const fromEnv = process.env[name]
-  if (fromEnv) return fromEnv
-  return execFileSync(
-    'doppler',
-    ['secrets', 'get', name, '--plain', '-p', 'modelschemas', '-c', 'dev'],
-    { encoding: 'utf8' },
-  ).trim()
-}
 
 interface Usage {
   input: number
@@ -104,7 +93,8 @@ function standInBinding(
       },
       body: JSON.stringify({
         ...body,
-        model: model.replace(/^anthropic\//, ''),
+        // Back from the gateway catalog id to Anthropic's.
+        model: model.replace(/^anthropic\//, '').replaceAll('.', '-'),
       }),
     })
     if (response.ok) pending.push(readUsage(response.clone()).then(onUsage))
@@ -137,56 +127,6 @@ function rawIdOf(llmsUrl: string): string {
   return llmsUrl
     .replace('https://fal.ai/models/', '')
     .replace(/\/llms\.txt$/, '')
-}
-
-const FAL_MODELS_URL = 'https://api.fal.ai/v1/models'
-
-async function falModels(params: URLSearchParams): Promise<Array<FalModel>> {
-  const key = secret('FAL_KEY')
-  const models: Array<FalModel> = []
-  let cursor: string | null = null
-  do {
-    if (cursor) params.set('cursor', cursor)
-    const response = await fetch(`${FAL_MODELS_URL}?${params.toString()}`, {
-      headers: { Authorization: `Key ${key}` },
-    })
-    if (!response.ok) throw new Error(`fal models ${response.status}`)
-    const page = (await response.json()) as {
-      models: Array<FalModel>
-      has_more: boolean
-      next_cursor: string | null
-    }
-    models.push(...page.models)
-    cursor = page.has_more ? page.next_cursor : null
-  } while (cursor)
-  return models
-}
-
-interface FalModel {
-  endpoint_id: string
-  openapi?: {
-    paths?: Record<string, { post?: { requestBody?: unknown } }>
-    components?: { schemas?: Record<string, unknown> }
-  }
-}
-
-/** Top-level input fields of the endpoint's POST body, as the bound schema has them. */
-async function requestPropertiesOf(rawId: string): Promise<Set<string>> {
-  const params = new URLSearchParams({
-    endpoint_id: rawId,
-    expand: 'openapi-3.0',
-  })
-  const [model] = await falModels(params)
-  const spec = model?.openapi
-  const post = Object.values(spec?.paths ?? {}).find((op) => op.post)?.post
-  let schema: unknown = (
-    post?.requestBody as
-      | { content?: Record<string, { schema?: unknown }> }
-      | undefined
-  )?.content?.['application/json']?.schema
-  const ref = (schema as { $ref?: string } | undefined)?.$ref
-  if (ref) schema = spec?.components?.schemas?.[ref.split('/').pop() ?? '']
-  return requestSchemaPropertyNames(schema)
 }
 
 async function loadSection(rawId: string): Promise<Section | null> {

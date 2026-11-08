@@ -358,7 +358,8 @@ describe('extractRateCard through the gateway', () => {
     expect(card.source.hash).toBe(args.sourceHash)
     expect(card.source.url).toBe(args.sourceUrl)
     const [model, input, options] = run.mock.calls[0] ?? []
-    expect(model).toBe(`anthropic/${FAL_PRICING_EXTRACT_MODEL}`)
+    // Cloudflare's catalog id, not Anthropic's (#556).
+    expect(model).toBe('anthropic/claude-sonnet-5.5')
     expect(options).toMatchObject({ gateway: { id: 'gw-test' } })
     // Claude 5 400s on temperature (#550).
     expect(input).not.toHaveProperty('temperature')
@@ -394,6 +395,113 @@ describe('extractRateCard through the gateway', () => {
       'user',
     ])
     expect(textOf(retry.messages[2]?.content)).toContain('$0.08')
+  })
+
+  const promoSection = `## Pricing
+
+Limited-time promo (50% off) until **October 31, 2026**: speech costs **$0.015** per **1,000 characters** of input text (regular price: $0.03).`
+  const promoCard = {
+    inputs: {
+      characters: { param: 'characters', kind: 'number', bound: 'usage' },
+    },
+    tables: {},
+    price: { '*': [{ '/': [{ var: 'characters' }, 1000] }, 0.015] },
+    examples: [
+      {
+        params: { characters: 1000 },
+        usd: 0.015,
+        quote: 'speech costs **$0.015** per **1,000 characters**',
+      },
+    ],
+    expiresAt: '2026-10-31T23:59:59Z',
+  }
+  const { expiresAt: _promoEnd, ...regularCard } = {
+    ...promoCard,
+    price: { '*': [{ '/': [{ var: 'characters' }, 1000] }, 0.03] },
+    examples: [
+      {
+        params: { characters: 1000 },
+        usd: 0.03,
+        quote: 'regular price: $0.03',
+      },
+    ],
+  }
+
+  it('keeps a promo card whose end is still ahead', async () => {
+    const run = gatewayReplies(promoCard)
+    const card = await extract({ ...args, pricingText: promoSection }, run)
+    expect(card).toMatchObject({ source: { expiresAt: promoCard.expiresAt } })
+    expect(textOf(runInput(run, 0).messages[0]?.content)).toContain(
+      'Today: 2026-06-11',
+    )
+  })
+
+  it('sends an ended promo back once and takes the regular rate (#552)', async () => {
+    const run = gatewayReplies(promoCard, regularCard)
+    const card = await extract(
+      { ...args, pricingText: promoSection, now: Date.UTC(2026, 10, 4) / 1000 },
+      run,
+    )
+    expect(card).toMatchObject({ price: regularCard.price })
+    if (card === 'unverified' || 'error' in card) return
+    expect(card.source.expiresAt).toBeUndefined()
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(textOf(runInput(run, 1).messages[2]?.content)).toContain(
+      'the promo ended 2026-10-31T23:59:59Z',
+    )
+  })
+
+  it('takes unverified for an ended promo that states no regular rate (#552)', async () => {
+    const promoOnly = promoSection.replace(' (regular price: $0.03)', '')
+    const ended = { unverified: true, expiresAt: promoCard.expiresAt }
+    // Over: the section states no current price.
+    const over = gatewayReplies(ended)
+    await expect(
+      extract(
+        { ...args, pricingText: promoOnly, now: Date.UTC(2026, 10, 4) / 1000 },
+        over,
+      ),
+    ).resolves.toBe('unverified')
+    expect(over).toHaveBeenCalledTimes(1)
+    // Still running: the promo card is the price, so unverified is refused.
+    const live = gatewayReplies(ended, promoCard)
+    const card = await extract({ ...args, pricingText: promoOnly }, live)
+    expect(card).toMatchObject({ source: { expiresAt: promoCard.expiresAt } })
+    expect(textOf(runInput(live, 1).messages[2]?.content)).toContain(
+      'the section names $0.015',
+    )
+    // No promo in the section: a past end is a lazy refusal, not a fact.
+    const lazy = gatewayReplies(
+      { unverified: true, expiresAt: '2020-01-01T00:00:00Z' },
+      body,
+    )
+    await extract(args, lazy)
+    expect(textOf(runInput(lazy, 1).messages[2]?.content)).toContain(
+      'the section names $0.08',
+    )
+  })
+
+  it('reads the card after the model explains itself, fenced or not, in one turn (#552)', async () => {
+    // Live Sonnet 5.5 reply shapes: a sentence, then the card.
+    const prose =
+      'The promo ended on October 31, 2026, so I price at the regular rate.'
+    const json = JSON.stringify(regularCard)
+    for (const reply of [
+      `${prose}\n\n\`\`\`json\n${json}\n\`\`\``,
+      `${prose}\n\n${json}`,
+    ]) {
+      const run = gatewayReplies(reply)
+      const card = await extract(
+        {
+          ...args,
+          pricingText: promoSection,
+          now: Date.UTC(2026, 10, 4) / 1000,
+        },
+        run,
+      )
+      expect(card).toMatchObject({ price: regularCard.price })
+      expect(run).toHaveBeenCalledTimes(1)
+    }
   })
 
   it('returns the rejection when a priced section is refused twice', async () => {

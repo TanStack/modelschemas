@@ -7,6 +7,8 @@ import {
   parseThinkingTable,
 } from './anthropic-features.ts'
 import {
+  GEMINI_MODELS_INDEX_URL,
+  GEMINI_THINKING_URL,
   familyOf,
   geminiModelFeatures,
   parseModelIndexDocs,
@@ -304,6 +306,7 @@ describe('gemini features (issue #77)', () => {
       run: () => Promise<T>,
       options?: {
         index?: string
+        thinking?: string
         extras?: Record<string, string | null | 404>
       },
     ): Promise<T> => {
@@ -313,13 +316,14 @@ describe('gemini features (issue #77)', () => {
         Object.keys(pages)
           .map((name) => `${INDEX}/${name}`)
           .join('\n')
+      const thinkingBody = options?.thinking ?? thinking
       const extras = options?.extras ?? {}
       globalThis.fetch = ((url: string) => {
         const href = String(url)
         const slug = href.match(/\/models\/([^/]+)\.md\.txt$/)?.[1]
         const extra = Object.keys(extras).find((key) => href.endsWith(key))
         const body = href.endsWith('/thinking.md.txt')
-          ? thinking
+          ? thinkingBody
           : slug && Object.hasOwn(pages, slug)
             ? pages[slug]
             : extra
@@ -378,6 +382,50 @@ describe('gemini features (issue #77)', () => {
       )
       // No page at all is a plain unknown.
       expect(features('gemma-4-31b-it', false).absent).toBeUndefined()
+    })
+
+    it('keeps stored page facts when the models index parses no slugs (#567)', async () => {
+      const { features, docsFailures } = await withPages(
+        { 'gemini-2.5-flash': page('**Inputs** Text **Output** Text') },
+        () => geminiModelFeatures(['gemini-2.5-flash']),
+        { index: 'The docs moved.' },
+      )
+      expect(features('gemini-2.5-flash', true)).toMatchObject({
+        modalities: null,
+        serverTools: null,
+        absent: { modalities: 'unavailable', serverTools: 'unavailable' },
+      })
+      expect(
+        features('gemini-2.5-flash', true).absent?.reasoning,
+      ).toBeUndefined()
+      expect(docsFailures.first).toEqual([
+        expect.objectContaining({
+          source: GEMINI_MODELS_INDEX_URL,
+          error: 'gemini models index: 0 slugs',
+        }),
+      ])
+    })
+
+    it('keeps stored reasoning when the thinking page parses nothing (#567)', async () => {
+      const { features, docsFailures, thinkingLoaded } = await withPages(
+        { 'gemini-2.5-flash': page('**Inputs** Text **Output** Text') },
+        () => geminiModelFeatures(['gemini-2.5-flash']),
+        { thinking: '' },
+      )
+      expect(thinkingLoaded).toBe(false)
+      expect(features('gemini-2.5-flash', true)).toMatchObject({
+        modalities: { input: ['text'], output: ['text'] },
+        serverTools: ['googleSearch'],
+        reasoning: null,
+        absent: { reasoning: 'unavailable' },
+      })
+      expect(features('gemini-2.5-flash', false).absent).toBeUndefined()
+      expect(docsFailures.first).toEqual([
+        expect.objectContaining({
+          source: GEMINI_THINKING_URL,
+          error: 'gemini thinking page: parsed 0 model rows',
+        }),
+      ])
     })
 
     it('refuses a poll in which no page that loaded states modalities', async () => {

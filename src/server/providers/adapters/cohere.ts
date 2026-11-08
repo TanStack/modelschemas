@@ -13,6 +13,7 @@ import {
   overlayModelFacts,
 } from '../reasoning-config.ts'
 import { fetchJson, fetchOpenApi, skippedResult } from '../types.ts'
+import { bearerConnect } from '../connect.ts'
 import type {
   ListModelsResult,
   ModelInfo,
@@ -196,6 +197,7 @@ export const provider: ProviderConfig = {
   specSourceUrl: COHERE_OPENAPI_URL,
   modelsEndpoint: COHERE_MODELS_URL,
   defaultDerivation: 'upstream-spec',
+  connect: bearerConnect('https://api.cohere.com'),
   fetchSpec,
   listModels,
   classify,

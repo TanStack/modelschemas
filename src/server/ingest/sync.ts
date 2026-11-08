@@ -19,7 +19,7 @@ import {
 import type { Activity } from '#/db/schema.ts'
 import { seedForProvider } from '#/db/seed-providers.ts'
 import { errorMessage } from '#/server/errors.ts'
-import { contentHash, putJson, schemaKey } from '#/server/kv.ts'
+import { contentHash } from '#/server/kv.ts'
 import {
   isMissingSecretSkip,
   PROVENANCE_MARKER,
@@ -85,6 +85,15 @@ export interface ClassifiedEndpoint {
   verifiedAt: string | null
   input?: Record<string, JsonValue>
   output?: Record<string, JsonValue>
+  /**
+   * SSE event schema when `output` is the JSON success body. Absent when
+   * there is no separate event schema.
+   */
+  streamOutput?: Record<string, JsonValue>
+  /** Set only when the body is not `application/json`. */
+  requestContentType: string | null
+  /** Set only when the success body is not a single JSON media type. */
+  responseContentTypes: Array<string> | null
   /** WMA AsyncAPI — catalog flag; skip HTTP OpenAPI assembly. */
   asyncapi?: boolean
 }
@@ -155,6 +164,7 @@ export function classifyAndBundle(
         for (const [kind, schema] of [
           ['input', extracted.input],
           ['output', extracted.output],
+          ['stream', extracted.streamOutput],
         ] as const) {
           if (schema && findDanglingRefs(schema).length > 0) {
             warnings.push(
@@ -187,6 +197,13 @@ export function classifyAndBundle(
           verifiedAt,
           input: extracted.input,
           output: extracted.output,
+          streamOutput: extracted.streamOutput,
+          requestContentType: storedRequestContentType(
+            extracted.inputContentType,
+          ),
+          responseContentTypes: storedResponseContentTypes(
+            extracted.outputContentTypes,
+          ),
         })
       }
     }
@@ -233,8 +250,35 @@ function classifiedFromBundled(
     verifiedAt: extra.verifiedAt ?? null,
     input,
     output,
+    requestContentType: null,
+    responseContentTypes: null,
     asyncapi: extra.asyncapi,
   }
+}
+
+/** JSON is the column default, stored as null so a sync does not rewrite every row. */
+function storedRequestContentType(type: string | undefined): string | null {
+  if (!type || type === 'application/json') return null
+  return type
+}
+
+function storedResponseContentTypes(
+  types: Array<string> | undefined,
+): Array<string> | null {
+  if (!types || types.length === 0) return null
+  if (types.length === 1 && types[0] === 'application/json') return null
+  return types
+}
+
+function sameContentTypes(
+  left: Array<string> | null | undefined,
+  right: Array<string> | null,
+): boolean {
+  const a = left ?? null
+  if (a === null || right === null) return a === right
+  return (
+    a.length === right.length && a.every((type, index) => type === right[index])
+  )
 }
 
 async function applyAsyncApiCatalogFlags(
@@ -315,7 +359,10 @@ export async function ensureProviderRow(
 }
 
 /** Composite map key for an endpoint's current version of one kind. */
-function versionKey(endpointId: string, kind: 'input' | 'output'): string {
+function versionKey(
+  endpointId: string,
+  kind: 'input' | 'output' | 'stream',
+): string {
   return `${endpointId}\u0000${kind}`
 }
 
@@ -323,7 +370,7 @@ export async function syncProvider(
   deps: SyncDeps,
   provider: ProviderConfig,
 ): Promise<SyncOutcome> {
-  const { db, kv, secrets } = deps
+  const { db, secrets } = deps
   const now = deps.now?.() ?? Math.floor(Date.now() / 1000)
   const outcome: SyncOutcome = {
     providerId: provider.id,
@@ -431,6 +478,8 @@ export async function syncProvider(
           method: endpoint.method,
           path: endpoint.path,
           description: endpoint.description,
+          requestContentType: endpoint.requestContentType,
+          responseContentTypes: endpoint.responseContentTypes,
         }),
         db.insert(changes).values({
           id: newChangeId(),
@@ -444,20 +493,28 @@ export async function syncProvider(
       outcome.changesWritten++
     } else if (
       existing.activity !== endpoint.activity ||
-      existing.description !== endpoint.description
+      existing.description !== endpoint.description ||
+      existing.requestContentType !== endpoint.requestContentType ||
+      !sameContentTypes(
+        existing.responseContentTypes,
+        endpoint.responseContentTypes,
+      )
     ) {
       await db
         .update(endpoints)
         .set({
           activity: endpoint.activity,
           description: endpoint.description,
+          requestContentType: endpoint.requestContentType,
+          responseContentTypes: endpoint.responseContentTypes,
         })
         .where(eq(endpoints.id, endpoint.dbId))
     }
 
-    for (const [kind, schema] of [
-      ['input', endpoint.input],
-      ['output', endpoint.output],
+    for (const [kind, schema, announce] of [
+      ['input', endpoint.input, true],
+      ['output', endpoint.output, true],
+      ['stream', endpoint.streamOutput, false],
     ] as const) {
       if (!schema) continue
       const hash = await contentHash(schema)
@@ -496,39 +553,38 @@ export async function syncProvider(
             createdAt: now,
           },
         })
-      const change = db.insert(changes).values({
-        id: newChangeId(),
-        type: current ? 'schema.updated' : 'schema.added',
-        providerId: provider.id,
-        subjectId: endpoint.dbId,
-        summary: `${current ? 'Updated' : 'Added'} ${kind} schema for ${endpoint.path}`,
-        payload: {
-          kind,
-          contentHash: hash,
-          previousHash: current?.contentHash ?? null,
-        },
-        createdAt: now,
-      })
-      // Content-addressed, so a blob left by a failed batch is unreferenced,
-      // never wrong.
-      await putJson(kv, schemaKey(hash), schema)
-      // One batch, so a run that dies here never leaves two current rows,
-      // nor a current row with no change, which no later run would write:
-      // the next run finds the hash current and skips it.
-      if (current) {
-        await db.batch([
-          db
+      // One batch, so a run that dies here never leaves two current rows.
+      // `stream` is not a public schema kind: the generation document reads
+      // the row, and the changes feed stays `input` | `output`.
+      const supersede = current
+        ? db
             .update(schemaVersions)
             .set({ supersededAt: now })
-            .where(eq(schemaVersions.id, current.id)),
-          insert,
-          change,
-        ])
+            .where(eq(schemaVersions.id, current.id))
+        : null
+      if (announce) {
+        const change = db.insert(changes).values({
+          id: newChangeId(),
+          type: current ? 'schema.updated' : 'schema.added',
+          providerId: provider.id,
+          subjectId: endpoint.dbId,
+          summary: `${current ? 'Updated' : 'Added'} ${kind} schema for ${endpoint.path}`,
+          payload: {
+            kind,
+            contentHash: hash,
+            previousHash: current?.contentHash ?? null,
+          },
+          createdAt: now,
+        })
+        if (supersede) await db.batch([supersede, insert, change])
+        else await db.batch([insert, change])
+        outcome.changesWritten++
+      } else if (supersede) {
+        await db.batch([supersede, insert])
       } else {
-        await db.batch([insert, change])
+        await insert
       }
       outcome.versionsAdded++
-      outcome.changesWritten++
     }
   }
 

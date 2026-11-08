@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { contentHash } from './kv.ts'
-import { cachedJson, cachedText, ifNoneMatchSatisfied } from './http-cache.ts'
+import {
+  CATALOG_CACHE_SECONDS,
+  cachedJson,
+  cachedText,
+  ifNoneMatchSatisfied,
+  versionedSchemaCache,
+} from './http-cache.ts'
 
 const FETCHED = 1_781_150_000
 const STALE = FETCHED + 600
@@ -25,7 +31,7 @@ describe('cachedJson', () => {
       new Date(FETCHED * 1000).toUTCString(),
     )
     expect(response.headers.get('cache-control')).toBe(
-      'public, max-age=60, stale-while-revalidate=600',
+      `public, max-age=${String(CATALOG_CACHE_SECONDS)}, stale-while-revalidate=600`,
     )
     expect(response.headers.get('x-fetched-at')).toBe(String(FETCHED))
     expect(response.headers.get('x-stale-at')).toBe(String(STALE))
@@ -42,6 +48,7 @@ describe('cachedJson', () => {
     expect(response.status).toBe(304)
     expect(await response.text()).toBe('')
     expect(response.headers.get('etag')).toBe(`"${etag}"`)
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
     expect(response.headers.get('x-stale-at')).toBe(String(STALE))
   })
 
@@ -76,6 +83,20 @@ describe('cachedJson', () => {
     )
     expect(response.headers.get('cache-control')).toBe(
       'public, max-age=5, stale-while-revalidate=30',
+    )
+  })
+
+  it('caches a content-addressed read for a year and marks it immutable', async () => {
+    const response = await cachedJson(
+      request(),
+      {},
+      { etag: 'abc', ...versionedSchemaCache(FETCHED) },
+    )
+    expect(response.headers.get('cache-control')).toBe(
+      'public, max-age=31536000, immutable',
+    )
+    expect(response.headers.get('last-modified')).toBe(
+      new Date(FETCHED * 1000).toUTCString(),
     )
   })
 })

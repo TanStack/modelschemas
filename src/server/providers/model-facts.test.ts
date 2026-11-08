@@ -6,7 +6,12 @@ import {
   parseAnthropicPricing,
 } from './anthropic-pricing.ts'
 import { ANTHROPIC_PRICING_PAGE } from './fixtures/anthropic-pricing.ts'
-import { geminiModelPricing, parseGeminiPricing } from './gemini-pricing.ts'
+import { GEMINI_DEPRECATIONS_URL } from './gemini-bindings.ts'
+import {
+  GEMINI_PRICING_URL,
+  geminiModelPricing,
+  parseGeminiPricing,
+} from './gemini-pricing.ts'
 import { geminiCapabilities } from './gemini.ts'
 import {
   grokImageCard,
@@ -19,6 +24,8 @@ import {
   withGrokImageQuality,
 } from './grok.ts'
 import {
+  docsReport,
+  docsRun,
   llmsFullPage,
   markdownTableRows,
   tokenCount,
@@ -1503,17 +1510,55 @@ describe('gemini pricing page', () => {
     }
   })
 
-  it('throws when the deprecations body is not the deprecations page', async () => {
+  it('keeps parsed prices when the deprecations body is not the page', async () => {
     const page = section(
       'gemini-3.6-flash',
       `<tr><td>Input price</td><td>Free</td><td>$0.75</td></tr>
        <tr><td>Output price</td><td>Free</td><td>$3.75</td></tr>`,
     )
+    const run = docsRun()
     vi.stubGlobal('fetch', () => Promise.resolve(new Response(page)))
     try {
-      await expect(geminiModelPricing()).rejects.toThrow(
+      const pricing = await geminiModelPricing(undefined, run)
+      expect(pricing('gemini-3.6-flash').pricing).toBeTruthy()
+      // Unpriced, and the routes page was unreadable: keep the stored card.
+      expect(pricing('gemini-2.0-flash')).toEqual({
+        absent: { pricing: 'unavailable' },
+      })
+      expect(docsReport(run).first[0]?.source).toBe(GEMINI_DEPRECATIONS_URL)
+      expect(docsReport(run).first[0]?.error).toMatch(
         /not the Gemini API deprecations page/,
       )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('keeps stored cards when the pricing page parses nothing (#567)', async () => {
+    const run = docsRun()
+    vi.stubGlobal('fetch', (url: string) =>
+      Promise.resolve(
+        new Response(
+          String(url).includes('deprecations')
+            ? 'This page lists the known deprecation schedules.\n'
+            : '<html></html>',
+        ),
+      ),
+    )
+    try {
+      const pricing = await geminiModelPricing(undefined, run)
+      expect(pricing('gemini-2.5-flash')).toEqual({
+        absent: { pricing: 'unavailable' },
+      })
+      expect(docsReport(run)).toMatchObject({
+        failed: 1,
+        first: [
+          {
+            source: GEMINI_PRICING_URL,
+            error: 'gemini pricing page: parsed 0 model rows',
+          },
+        ],
+      })
     } finally {
       vi.unstubAllGlobals()
     }

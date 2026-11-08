@@ -3,10 +3,13 @@
 Live AI model schema service on Cloudflare Workers: per-endpoint
 request/response JSON Schemas and model metadata for monitored providers
 (OpenAI, Anthropic, Gemini, xAI Grok, ElevenLabs, OpenRouter, FAL, BytePlus),
-with
-react-query-style server-side caching (D1 source of truth, KV hot cache,
-stale-while-revalidate) and automatic refresh — model lists every 15 minutes,
-full OpenAPI spec syncs daily.
+with public GETs on a D1 read session and edge caching (`max-age` of
+15 minutes on catalog and current schema reads; a year on
+`?version=<hash>`; purged after an admin sync). Turn on D1 read replication
+(`read_replication.mode: auto`) only after #554 recreates the database
+with a US primary; until then the session still reads the primary.
+Automatic refresh — model lists every 15 minutes, full OpenAPI spec
+syncs daily. KV holds rate-limit counters and the docs cache the crons use.
 
 Surfaces:
 
@@ -197,6 +200,28 @@ and `@modelschemas/client` types its responses from it.
 - A change that is not additive is also recorded in
   [docs/api-changes.md](docs/api-changes.md).
 
+### Generation OpenAPI (`GET /v1/openapi/{provider}`)
+
+One operation per endpoint. A response that can be JSON or a stream lists
+`application/json` (or `text/plain`) and `text/event-stream` under one
+`200`, as OpenAI's own spec does. Each schema's `$defs` are hoisted into
+`components.schemas`, so every `$ref` resolves within the document;
+identical definitions share one name, and a name two endpoints define
+differently gets a content-hash suffix. An upstream `#stream` path key
+(Mistral transcriptions) is merged into its base operation: the request
+body is `anyOf` both variants (`stream: false` / `stream: true`). A
+document that would still hold an unresolved `$ref` is refused with
+`500 unresolved_refs`, naming the ref and where it sits; twins that list
+one media type with different schemas are refused with
+`500 schema_conflict`.
+
+**Breaking:** the `{path}#stream` SSE twins are gone. hey-api 0.99.0 types
+a JSON-or-SSE response as JSON only and returns the stream as one string
+([hey-api/hey-api#4482](https://github.com/hey-api/hey-api/issues/4482)),
+so a hey-api client loses typed streaming until that is fixed. Kubb v5
+handles it: the response is a union keyed by content type, and
+`toEventStream()` yields typed events.
+
 ## Examples
 
 Three TanStack Start apps in [`examples/`](./examples) exercise the
@@ -349,7 +374,10 @@ error. Re-pick the model with `bun scripts/compare-fal-extract-models.ts`.
 ### Continuous deploys (Workers Builds)
 
 Pushes to `main` deploy via Cloudflare Workers Builds (dashboard → Workers
-& Pages → `modelschemas` → Settings → Build → connect the GitHub repo).
+& Pages → `modelschemas` → Settings → Build → connect
+`TanStack/modelschemas`). The previous connection was
+`modelschemas/modelschemas` and does not follow the transfer.
+
 Settings:
 
 - **Build command:** `bun run build`
@@ -365,6 +393,28 @@ Settings:
 
 `bun run deploy` remains the manual/emergency path (build + the same
 migrate-then-deploy).
+
+A green CI run is not a deploy. Before debugging a production symptom a
+merged PR should have fixed, confirm the merge is live:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<account> bunx wrangler deployments list --name modelschemas | tail
+```
+
+The newest `Created:` must postdate the merge. If it does not, the Builds
+connection is broken (the move to `TanStack/modelschemas` dropped it —
+#553 — and #557 stayed undeployed for two days while every FAL extract kept
+failing on the old model id, #552). Reconnect it, or deploy by hand with
+the production browser config:
+
+```bash
+DOPPLER_PROJECT=modelschemas CLOUDFLARE_ACCOUNT_ID=<account> \
+  bun run secrets:build && bun run deploy:ci
+```
+
+`DOPPLER_PROJECT` is needed because the secrets scripts pass no
+`--project`; `CLOUDFLARE_ACCOUNT_ID` because wrangler cannot pick between
+two authorised accounts non-interactively.
 
 ## Releasing on npm
 
@@ -391,13 +441,16 @@ so the first version of each name was a laptop `npm publish` with 2FA,
 then stage-only trusted publishers. Repeat that only when adding a **new
 package name**.
 
-Trusted-publisher config on every package must match:
+Trusted-publisher config on every package must match. Trusted publishing
+is bound to the repo path, so the `modelschemas/modelschemas` publisher
+does not survive the move: re-run this for every `@modelschemas/*` package
+and for unscoped `modelschemas`.
 
 ```bash
 npm install -g npm@11.19.0  # trust/stage need >= 11.15; npm 12 wants Node 24.15+
 npm trust github <name> \
   --file publish.yml \
-  --repo modelschemas/modelschemas \
+  --repo TanStack/modelschemas \
   --env npm \
   --allow-stage-publish
 ```

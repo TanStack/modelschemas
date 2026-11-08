@@ -129,6 +129,36 @@ export const provider: ProviderConfig = {
   specSourceUrl: AZURE_SPEC_URL,
   modelsEndpoint: AZURE_MODELS_URL,
   defaultDerivation: 'upstream-spec',
+  // Azure's v1 data plane: https://{resource}.openai.azure.com/openai/v1.
+  // Either an `api-key` header or a Microsoft Entra bearer token.
+  connect: {
+    servers: [
+      {
+        url: 'https://{resource}.openai.azure.com/openai/v1',
+        variables: {
+          resource: {
+            default: 'my-resource',
+            description: 'The Azure OpenAI resource name.',
+          },
+        },
+      },
+    ],
+    securitySchemes: {
+      apiKey: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'api-key',
+        description: 'An Azure OpenAI resource key.',
+      },
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        description:
+          'A Microsoft Entra token for https://cognitiveservices.azure.com/.default as `Authorization: Bearer <token>`.',
+      },
+    },
+    security: [{ apiKey: [] }, { bearerAuth: [] }],
+  },
   fetchSpec,
   listModels,
   classify: classifyOpenAiCompat,

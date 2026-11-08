@@ -617,6 +617,36 @@ export type HalLink = {
       }
 }
 
+/**
+ * One row of GET /v1/providers plus activities. Model counts are live rows; counts.deprecated holds the rest.
+ */
+export type Provider = {
+  id: string
+  displayName: string
+  status: string
+  lastPolledAt?: number | null
+  lastSyncedAt?: number | null
+  counts: {
+    [key: string]: number
+  }
+  spec: {
+    grain: 'provider' | 'model'
+    endpointCount: number
+  }
+  /**
+   * Live model count per activity. A key is present only when the provider has a live model with that activity.
+   */
+  activities: {
+    [key: string]: number
+  }
+  _links: {
+    self: HalLink
+    models: HalLink
+    schemas: HalLink
+    openapi?: HalLink
+  }
+}
+
 export type ModelLinks = {
   provider: HalLink
   schemas: HalLink
@@ -1126,6 +1156,37 @@ export type ListProvidersResponses = {
 export type ListProvidersResponse =
   ListProvidersResponses[keyof ListProvidersResponses]
 
+export type GetProviderData = {
+  body?: never
+  path: {
+    /**
+     * Provider slug (see GET /v1/providers).
+     */
+    provider: string
+  }
+  query?: never
+  url: '/v1/providers/{provider}'
+}
+
+export type GetProviderErrors = {
+  /**
+   * Error
+   */
+  404: Error
+}
+
+export type GetProviderError = GetProviderErrors[keyof GetProviderErrors]
+
+export type GetProviderResponses = {
+  /**
+   * Provider detail.
+   */
+  200: Provider
+}
+
+export type GetProviderResponse =
+  GetProviderResponses[keyof GetProviderResponses]
+
 export type ListProviderModelsData = {
   body?: never
   path: {
@@ -1400,7 +1461,7 @@ export type GetProviderOpenApiData = {
   }
   query?: {
     /**
-     * Pin to one model (raw id or slug). Required for model-grained providers.
+     * Pin to one model (raw id or slug).
      */
     model?: string
     /**

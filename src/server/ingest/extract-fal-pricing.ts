@@ -71,17 +71,31 @@ export function falPricingExtractCursorKey(providerId = 'fal'): string {
 
 /**
  * Single extract model — fail-closed; never a second guess. Picked by
- * `scripts/compare-fal-extract-models.ts` (#550). Anthropic's id: the
- * binding fetch prefixes `anthropic/` for the gateway.
+ * `scripts/compare-fal-extract-models.ts` (#550). Anthropic's id, which the
+ * adapter needs for its model table; `GATEWAY_MODEL_IDS` names it on the wire.
  */
 export const FAL_PRICING_EXTRACT_MODEL = 'claude-sonnet-5-5'
+
+/**
+ * Cloudflare's catalog id for each Anthropic id (#556): the gateway knows
+ * `anthropic/claude-sonnet-5.5` and 500s on Anthropic's `claude-sonnet-5-5`.
+ * The binding fetch adds the `anthropic/` prefix.
+ */
+export const GATEWAY_MODEL_IDS = {
+  'claude-sonnet-5-5': 'claude-sonnet-5.5',
+  'claude-haiku-5-5': 'claude-haiku-5.5',
+} as const
 
 const extractedBodySchema = rateCardSchema.omit({ source: true }).extend({
   expiresAt: z.iso.datetime().optional(),
 })
 
 const extractedResponseSchema = z.union([
-  z.object({ unverified: z.literal(true) }),
+  // expiresAt: the section's only price is a promo that ended then (#552).
+  z.object({
+    unverified: z.literal(true),
+    expiresAt: z.iso.datetime().optional(),
+  }),
   extractedBodySchema,
 ])
 
@@ -144,6 +158,10 @@ export function pricingSection(llmsTxt: string): string {
  * suffix-`$` spellings (`$**0.04**`, `**0.17** $`) are real prices, not
  * stubs (issue #70).
  */
+/** A section that names a promo or its end; only these may answer "ended". */
+const PROMO_WORDS =
+  /\b(?:promo(?:tion(?:al)?)?|limited[- ]time|until|through|ends?|expires?)\b/i
+
 export function isStubPricingSection(section: string): boolean {
   return usdAmounts(section).length === 0
 }
@@ -238,13 +256,19 @@ function logFetchFailure(
 
 function parseJsonObject(text: string): unknown {
   const trimmed = text.trim()
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed)
-  const body = fenced?.[1] ?? trimmed
+  // The model often explains itself first, fenced or not; the object is
+  // the reply (#552 — the repair turn was paying for the prose). The
+  // schema and verifyExamples still judge what it holds.
+  const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(trimmed)
+  const body =
+    fenced?.[1] ??
+    trimmed.slice(trimmed.indexOf('{'), trimmed.lastIndexOf('}') + 1)
   return JSON.parse(body) as unknown
 }
 
 export const EXTRACT_SYSTEM = `You write a modelschemas RateCard — a price calculator — from a FAL model's llms.txt Pricing section.
 Return JSON only: {"inputs": {...}, "tables": {...}, "price": <JSONLogic>, "examples": [...]}, optionally "expiresAt" (ISO datetime) when the text names a promo end. Do not include a source object.
+A promo whose end is before today (the message states today) is over: price at the regular rate the text states, with no expiresAt; if it states no regular rate, return {"unverified": true, "expiresAt": <the promo end>}.
 
 inputs: name → {"param": <field>, "kind": "number"|"enum"|"boolean"|"count", "bound": "request"|"usage", "default"?: ..., "values"?: [...] (enum only)}.
 - A request-bound param MUST be one of the allowed request properties (or a dotted child of one). Give it a default when the request may omit it.
@@ -270,9 +294,11 @@ Example. Section: "Each edit costs $0.10, plus $0.02 per reference image." Allow
 function extractUserPrompt(
   pricingText: string,
   requestProperties: ReadonlySet<string>,
+  now: number,
 ): string {
   const allowed = [...requestProperties].sort().join(', ')
-  return `Allowed request properties: ${allowed || '(none)'}
+  return `Today: ${new Date(now * 1000).toISOString().slice(0, 10)}
+Allowed request properties: ${allowed || '(none)'}
 
 Pricing section:
 ${pricingText}`
@@ -315,15 +341,33 @@ export function checkExtractedCard(
   }
   const priced = !isStubPricingSection(args.pricingText)
   if ('unverified' in parsed.data || parsed.data.examples.length === 0) {
-    return priced
+    // An ended promo with no regular rate stated is no price: the reply
+    // names the end, the section names a promo, and the clock agrees
+    // (#552). The section check keeps a lazy refusal from unpricing a row.
+    const ended =
+      'unverified' in parsed.data &&
+      parsed.data.expiresAt !== undefined &&
+      PROMO_WORDS.test(args.pricingText) &&
+      Date.parse(parsed.data.expiresAt) <= args.now * 1000
+    return priced && !ended
       ? {
           error: `the section names ${usdAmounts(args.pricingText)
             .map((usd) => `$${usd}`)
-            .join(', ')}; write the card with one example per quoted rate`,
+            .join(
+              ', ',
+            )}; write the card with one example per quoted rate, or {"unverified": true, "expiresAt": <end>} if its only price is a promo that has ended`,
         }
       : 'unverified'
   }
   const card = withSource(parsed.data, args)
+  // A card must not arrive already expired: the catalog would serve the
+  // ended promo until the next lap re-read it the same way (#552).
+  const expiresAt = card.source.expiresAt
+  if (expiresAt !== undefined && Date.parse(expiresAt) <= args.now * 1000) {
+    return {
+      error: `the promo ended ${expiresAt}; price at the regular rate the section states, without expiresAt`,
+    }
+  }
   if (!cardRequestParamsOk(card, args.requestProperties)) {
     return {
       error:
@@ -370,9 +414,7 @@ export type ExtractChat = (turns: Array<ChatTurn>) => Promise<string>
 export function gatewayChat(
   ai: Ai,
   gatewayId: string,
-  model:
-    | typeof FAL_PRICING_EXTRACT_MODEL
-    | 'claude-haiku-5-5' = FAL_PRICING_EXTRACT_MODEL,
+  model: keyof typeof GATEWAY_MODEL_IDS = FAL_PRICING_EXTRACT_MODEL,
 ): ExtractChat {
   const bindingFetch = cloudflareBindingFetch({
     binding: ai,
@@ -383,9 +425,12 @@ export function gatewayChat(
   // and drops the binding's error, so keep it and rethrow it as the cause.
   let bindingError: unknown
   const adapter = createAnthropicChat(model, 'cloudflare-binding', {
-    fetch: async (...args: Parameters<typeof bindingFetch>) => {
+    fetch: async (
+      input: Parameters<typeof bindingFetch>[0],
+      init?: RequestInit,
+    ) => {
       try {
-        const response = await bindingFetch(...args)
+        const response = await bindingFetch(input, withGatewayModel(init))
         // A retry got through: an earlier throw is not this call's cause.
         bindingError = undefined
         return response
@@ -414,6 +459,19 @@ export function gatewayChat(
   }
 }
 
+/** The request with its `model` swapped for the gateway catalog id. */
+function withGatewayModel(
+  init: RequestInit | undefined,
+): RequestInit | undefined {
+  if (typeof init?.body !== 'string') return init
+  const body = JSON.parse(init.body) as { model?: string }
+  const ids: Partial<Record<string, string>> = GATEWAY_MODEL_IDS
+  const id = ids[body.model ?? '']
+  if (id === undefined)
+    throw new Error(`no gateway catalog id for model ${body.model}`)
+  return { ...init, body: JSON.stringify({ ...body, model: id }) }
+}
+
 /**
  * One model, at most two turns: a rejected card goes back once with the
  * reason (same model — not a fallback). `{ error }` = no card this run; the
@@ -425,7 +483,11 @@ export async function extractRateCard(
   const turns: Array<ChatTurn> = [
     {
       role: 'user',
-      content: extractUserPrompt(args.pricingText, args.requestProperties),
+      content: extractUserPrompt(
+        args.pricingText,
+        args.requestProperties,
+        args.now,
+      ),
     },
   ]
   try {

@@ -8,7 +8,21 @@
 // Cloudflare.Env so bindings/vars/secrets stay auto-generated.
 type KVNamespace = import('@cloudflare/workers-types').KVNamespace
 type D1Database = import('@cloudflare/workers-types').D1Database
-type ExecutionContext = import('@cloudflare/workers-types').ExecutionContext
+// workers-types computes `ctx.exports` from a module-scoped `Cloudflare`
+// namespace, so the generated GlobalProps never reach it. Type the one
+// loopback binding this app uses (`enable_ctx_exports`) by hand.
+type ExecutionContext = Omit<
+  import('@cloudflare/workers-types').ExecutionContext,
+  'exports'
+> & {
+  exports: {
+    /** `src/worker.ts` CachedReads, in lib.dom terms. */
+    CachedReads: {
+      fetch: (request: Request) => Promise<Response>
+      purge: () => Promise<void>
+    }
+  }
+}
 type SendEmail = import('@cloudflare/workers-types').SendEmail
 type ScheduledController =
   import('@cloudflare/workers-types').ScheduledController
@@ -21,6 +35,9 @@ declare module 'cloudflare:workers' {
 
   /** Durable Object base class (US_EGRESS, `src/server/us-egress-object.ts`). */
   export const DurableObject: typeof import('@cloudflare/workers-types').CloudflareWorkersModule.DurableObject
+
+  /** Named entrypoint base class (`CachedReads`, `src/worker.ts`). */
+  export const WorkerEntrypoint: typeof import('@cloudflare/workers-types').CloudflareWorkersModule.WorkerEntrypoint
 }
 
 type DurableObjectNamespace<

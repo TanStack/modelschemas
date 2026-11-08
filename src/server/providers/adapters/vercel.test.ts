@@ -2,10 +2,13 @@ import { price } from '@modelschemas/rate-card'
 import type { RateCard } from '@modelschemas/rate-card'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { OPENAI_SPEC_URL } from '../openai.ts'
+
 import {
   parseVercelModels,
   provider,
   VERCEL_MODELS_URL,
+  VERCEL_SERVER_URL,
   vercelReasoning,
 } from './vercel.ts'
 
@@ -69,6 +72,17 @@ const FIXTURE = {
   ],
 }
 
+/** OpenAI's document, trimmed: Vercel's compat routes are generated from it. */
+const OPENAI_SPEC = {
+  openapi: '3.1.0',
+  info: { title: 'OpenAI' },
+  paths: {
+    '/chat/completions': { post: { summary: 'chat' } },
+    '/embeddings': { post: { summary: 'embed' } },
+    '/batches': { post: { summary: 'batch' } },
+  },
+}
+
 const SOURCE: RateCard['source'] = {
   url: VERCEL_MODELS_URL,
   hash: 'abc',
@@ -82,12 +96,15 @@ afterEach(() => {
 })
 
 describe('vercel', () => {
-  it('lists gateway models from the Vercel payload and skips the spec', async () => {
+  it('lists gateway models from the Vercel payload and generates the compat spec', async () => {
     const urls: Array<string> = []
     globalThis.fetch = ((url: string) => {
       urls.push(String(url))
       if (String(url) === VERCEL_MODELS_URL) {
         return Promise.resolve(new Response(JSON.stringify(FIXTURE)))
+      }
+      if (String(url) === OPENAI_SPEC_URL) {
+        return Promise.resolve(new Response(JSON.stringify(OPENAI_SPEC)))
       }
       return Promise.reject(new Error(`unexpected fetch: ${String(url)}`))
     }) as typeof fetch
@@ -204,9 +221,13 @@ describe('vercel', () => {
       maxTokensField: 'max_tokens',
       thinking: null,
     })
-    expect(spec.skipped).toContain('skipped')
-    expect(spec.specs).toEqual([])
-    expect(urls).toEqual([VERCEL_MODELS_URL])
+    expect(spec.skipped).toBeUndefined()
+    expect(Object.keys(spec.specs[0]?.paths ?? {})).toEqual([
+      '/chat/completions',
+      '/embeddings',
+    ])
+    expect(spec.specs[0]?.servers).toEqual([{ url: VERCEL_SERVER_URL }])
+    expect(urls).toEqual([VERCEL_MODELS_URL, OPENAI_SPEC_URL])
   })
 
   it('re-quotes the standard schedule above an inclusive context min', () => {

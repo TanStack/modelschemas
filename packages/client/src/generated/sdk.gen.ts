@@ -24,9 +24,12 @@ import type {
   GetModelData,
   GetModelErrors,
   GetModelResponses,
+  GetProviderData,
+  GetProviderErrors,
   GetProviderOpenApiData,
   GetProviderOpenApiErrors,
   GetProviderOpenApiResponses,
+  GetProviderResponses,
   GetSchemaData,
   GetSchemaErrors,
   GetSchemaResponses,
@@ -108,6 +111,20 @@ export const listProviders = <ThrowOnError extends boolean = false>(
     unknown,
     ThrowOnError
   >({ url: '/v1/providers', ...options })
+
+/**
+ * One provider: status, counts, live models per activity
+ *
+ * The same row as GET /v1/providers plus activities: live model counts keyed by activity, the values GET /v1/openapi/{provider}?activity= and GET /v1/models?activity= accept.
+ */
+export const getProvider = <ThrowOnError extends boolean = false>(
+  options: Options<GetProviderData, ThrowOnError>,
+): RequestResult<GetProviderResponses, GetProviderErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    GetProviderResponses,
+    GetProviderErrors,
+    ThrowOnError
+  >({ url: '/v1/providers/{provider}', ...options })
 
 /**
  * List models for one provider
@@ -211,7 +228,7 @@ export const getSchema = <ThrowOnError extends boolean = false>(
 /**
  * Generation-only OpenAPI document for one provider
  *
- * Assembled from classified endpoints plus the provider connect profile (servers, auth, required headers). Not a raw upstream-spec mirror. Model-grained providers (today: FAL) require ?model=. Selections over 40 classified endpoints, or a filter that matches none, return 400 spec_requires_selector. An unsynced provider returns 404 no_endpoints. ?model= pins the live model enum on provider-grained specs; it does not drop endpoints.
+ * Assembled from classified endpoints plus the provider connect profile (servers, auth, required headers). Not a raw upstream-spec mirror. FAL (model-grained, queue) is one document: POST /{endpoint_id} and GET /{endpoint_id}/requests/{request_id}. endpoint_id is the model raw id (x-modelschemas-encode raw: do not percent-encode slashes). With no selector the bodies are untyped; ?activity= narrows the enum and inlines each model's own body schema (x-modelschemas-model), up to 1024 models; ?model= is that one model's paths. A filter that matches no endpoint returns 400 spec_requires_selector; there is no cap on the number of paths in a provider-grained document. An unsynced provider returns 404 no_endpoints. ?model= pins the live model enum on provider-grained specs; it does not drop endpoints.
  */
 export const getProviderOpenApi = <ThrowOnError extends boolean = false>(
   options: Options<GetProviderOpenApiData, ThrowOnError>,
