@@ -691,6 +691,13 @@ describe('mistral model page price and max output', () => {
         '- Pricing: Free; Input $0 /M Tokens; Output $0 /M Tokens',
       ),
     ).toBeNull()
+    // #584: mistral-moderation-26-03 states no side on its free meter.
+    expect(
+      parseMistralMarkdownPrice('- Pricing: Free; $0 /M Tokens'),
+    ).toBeNull()
+    expect(() =>
+      parseMistralMarkdownPrice('- Pricing: $0.1 /M Tokens'),
+    ).toThrow(/unreadable markdown meter/)
     expect(
       parseMistralMarkdownPrice('# Model\n- Status: Deprecated'),
     ).toBeNull()

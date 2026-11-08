@@ -918,22 +918,25 @@ export function parseMistralMarkdownPrice(
       free = true
       continue
     }
+    // The side label is optional: `Free; $0 /M Tokens` (moderation) states
+    // no side. Without a side only a $0 meter is readable.
     const match =
-      /^(input|output|cached input)\s+\$([\d,]+(?:\.\d+)?)\s+(\/\S+(?:\s+\S+)*)$/i.exec(
+      /^(?:(input|output|cached input)\s+)?\$([\d,]+(?:\.\d+)?)\s+(\/\S+(?:\s+\S+)*)$/i.exec(
         part,
       )
-    if (!match?.[1] || !match[2] || !match[3]) {
+    const amount = Number(match?.[2]?.replace(/,/g, ''))
+    if (!match?.[2] || !match[3] || !Number.isFinite(amount)) {
+      throw new Error(
+        `mistral model page pricing: unreadable markdown meter ${JSON.stringify(part)}`,
+      )
+    }
+    if (!match[1]) {
+      if (amount === 0) continue
       throw new Error(
         `mistral model page pricing: unreadable markdown meter ${JSON.stringify(part)}`,
       )
     }
     const label = match[1].toLowerCase()
-    const amount = Number(match[2].replace(/,/g, ''))
-    if (!Number.isFinite(amount)) {
-      throw new Error(
-        `mistral model page pricing: unreadable markdown meter ${JSON.stringify(part)}`,
-      )
-    }
     meters.push({
       side: label === 'output' ? 'output' : 'input',
       ...(label === 'cached input' ? { label: 'Cached input' } : {}),
