@@ -1,6 +1,6 @@
 {
   "name": "@modelschemas/rate-card",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Model pricing as data: a closed-vocabulary JSONLogic rate-card schema, a refuse-not-coerce evaluator with no dependencies, and listing compilers (OpenRouter).",
   "type": "module",
   "main": "./src/index.ts",
