@@ -5,7 +5,8 @@
  * rate lookup keyed by each criterion; a tier quoting several metrics is
  * billed for their sum. A criterion we cannot name, tiers that disagree on
  * their criteria, a missing combination, or a price unit this does not
- * know is not a card. Token prices that step up above a prompt length
+ * know is not a card. A keyed tier no card can state is left out, so a
+ * request naming it is refused (`stateable`). Token prices that step up above a prompt length
  * are the one range tier read.
  */
 import { compileTokenCard, compileUnitCard } from '@modelschemas/rate-card'
@@ -175,6 +176,31 @@ function compilePromptTiers(
 }
 
 /**
+ * A keyed tier a card can state. One the card cannot is left out, so its
+ * key value is not in the card and a request naming it is refused, never
+ * priced: a `null` value (the price when the request names none — an enum
+ * input cannot be absent), a metric with no known quantity
+ * (`unspecified_billing_metric`), or token prices under a key. The tiers
+ * left must still form the full grid.
+ */
+function stateable(tier: ReplicateTier): boolean {
+  const criteria = tier.criteria ?? []
+  if (criteria.length === 0) return true
+  if (criteria.some((c) => c.type === 'equals' && c.value === null)) {
+    return false
+  }
+  // Only these two known shapes are left out. A metric this file has never
+  // seen keeps its tier, so the grid fails and the poll logs pricing_lost.
+  return !(tier.prices ?? []).some(
+    (price) =>
+      price.metric === 'unspecified_billing_metric' ||
+      (price.metric !== undefined &&
+        Object.hasOwn(METRIC_PARAM, price.metric) &&
+        METRIC_PARAM[price.metric]!.endsWith('_tokens')),
+  )
+}
+
+/**
  * Dollar prediction price → rate card.
  * `null` when the config has no usable published price.
  *
@@ -189,11 +215,12 @@ export function compileReplicateBilling(
   billing: ReplicateBilling | null | undefined,
   source: RateCard['source'],
 ): RateCard | null {
-  const tiers = billing?.current_tiers
-  if (!tiers || tiers.length === 0) return null
-  if (tiers.some((tier) => tier.criteria?.some((c) => c.type === 'range'))) {
-    return compilePromptTiers(tiers, source)
+  const listed = billing?.current_tiers
+  if (!listed || listed.length === 0) return null
+  if (listed.some((tier) => tier.criteria?.some((c) => c.type === 'range'))) {
+    return compilePromptTiers(listed, source)
   }
+  const tiers = listed.filter(stateable)
 
   const leaves: Array<Leaf> = []
   let keyParams: Array<string> | null = null

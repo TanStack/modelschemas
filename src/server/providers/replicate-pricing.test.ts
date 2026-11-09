@@ -211,6 +211,116 @@ describe('replicate prediction prices', () => {
     ).toBeNull()
   })
 
+  it('leaves out the tier for a request that names no value (#600)', () => {
+    // https://replicate.com/xai/grok-imagine-video billingConfig.
+    const tier = (value: string | null, price: string) => ({
+      criteria: [{ title: 'target resolution', type: 'equals', value }],
+      prices: [
+        {
+          metric: 'video_output_duration_seconds',
+          price,
+          title: 'per second of output video',
+          type: 'per-unit',
+        },
+      ],
+    })
+    const card = compileReplicateBilling(
+      {
+        current_tiers: [
+          tier('720p', '$0.07'),
+          tier('480p', '$0.05'),
+          tier(null, '$0.05'),
+        ],
+      },
+      SOURCE,
+    )
+    expect(card?.tables.rate).toEqual({ '720p': 0.07, '480p': 0.05 })
+    if (!card) throw new Error('no card')
+    const priced = (params: Record<string, unknown>) =>
+      evaluateCard(card, { usage: params }).amount
+    expect(
+      priced({ target_resolution: '720p', video_seconds: 10 }),
+    ).toBeCloseTo(0.7, 10)
+    expect(() => priced({ video_seconds: 10 })).toThrow(/required/)
+  })
+
+  it('leaves out variants billed by tokens or an unnamed metric (#600)', () => {
+    // https://replicate.com/openai/gpt-image-2.6-flare billingConfig.
+    const variant = (value: string, prices: Array<object>) => ({
+      criteria: [{ title: 'model variant', type: 'equals', value }],
+      prices,
+    })
+    const tokens = [
+      {
+        metric: 'token_output_count',
+        price: '$0.000035',
+        title: 'Image output tokens',
+        type: 'per-unit',
+      },
+      {
+        metric: 'token_input_count',
+        price: '$0.00001',
+        title: 'Input tokens',
+        type: 'per-unit',
+      },
+    ]
+    const image = (price: string) => [
+      {
+        metric: 'image_output_count',
+        price,
+        title: 'per output image',
+        type: 'per-unit',
+      },
+    ]
+    const card = compileReplicateBilling(
+      {
+        current_tiers: [
+          variant('svg-gpt-5.5', [
+            ...tokens,
+            {
+              metric: 'unspecified_billing_metric',
+              price: '$0.000036',
+              title: 'gpt-5.5 output tokens',
+              type: 'per-unit',
+            },
+          ]),
+          variant('gif', tokens),
+          variant('low', image('$0.05')),
+          variant('max', image('$0.50')),
+        ],
+      },
+      SOURCE,
+    )
+    expect(card?.inputs.model_variant).toMatchObject({
+      values: ['low', 'max'],
+    })
+    expect(card?.tables.rate).toEqual({ low: 0.05, max: 0.5 })
+    if (!card) throw new Error('no card')
+    expect(() =>
+      evaluateCard(card, {
+        usage: { model_variant: 'gif', output_images: 1 },
+      }),
+    ).toThrow(/not one of/)
+  })
+
+  it('still refuses a keyed tier billed by a metric it has never seen', () => {
+    const variant = (value: string, metric: string) => ({
+      criteria: [{ title: 'model variant', type: 'equals', value }],
+      prices: [{ metric, price: '$0.05', title: 'x', type: 'per-unit' }],
+    })
+    expect(
+      compileReplicateBilling(
+        {
+          current_tiers: [
+            variant('low', 'image_output_count'),
+            variant('new', 'brand_new_metric'),
+          ],
+        },
+        SOURCE,
+      ),
+    ).toBeNull()
+  })
+
   it('reads billingConfig from the model page and ignores a page with none', () => {
     const html = `<section id="pricing"><script type="application/json">{"billingConfig":{"current_tiers":[{"criteria":[],"prices":[{"metric":"image_output_count","price":"$0.04","title":"per output image","type":"per-unit"}]}]}}</script>`
     expect(replicateBillingFromHtml(html)?.current_tiers).toHaveLength(1)
