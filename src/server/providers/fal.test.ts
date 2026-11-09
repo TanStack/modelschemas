@@ -156,6 +156,9 @@ describe('fal AsyncAPI discovery', () => {
     fetchMock.mockImplementation((input) => {
       const url = requestUrl(input)
       if (url.startsWith('https://api.fal.ai/v1/models')) {
+        if (new URL(url).searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+          return Promise.resolve(new Response('missing', { status: 404 }))
+        }
         return Promise.resolve(
           jsonBody({
             models: [
@@ -231,6 +234,9 @@ describe('fal AsyncAPI discovery', () => {
     fetchMock.mockImplementation((input) => {
       const url = requestUrl(input)
       if (url.startsWith('https://api.fal.ai/v1/models')) {
+        if (new URL(url).searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+          return Promise.resolve(new Response('missing', { status: 404 }))
+        }
         return Promise.resolve(
           jsonBody({
             models: [
@@ -264,6 +270,9 @@ describe('fal AsyncAPI discovery', () => {
     fetchMock.mockImplementation((input) => {
       const url = requestUrl(input)
       if (url.startsWith('https://api.fal.ai/v1/models')) {
+        if (new URL(url).searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+          return Promise.resolve(new Response('missing', { status: 404 }))
+        }
         return Promise.resolve(
           jsonBody({
             models: [
@@ -379,5 +388,35 @@ describe('fal AsyncAPI discovery', () => {
     await expect(
       falProvider.fetchSpec({ FAL_KEY: 'test-key' }),
     ).rejects.toThrow('403')
+  })
+
+  it('throws when the unlisted lookup returns a page without that id', async () => {
+    fetchMock.mockImplementation((input) => {
+      const url = requestUrl(input)
+      if (url.startsWith('https://api.fal.ai/v1/models')) {
+        if (new URL(url).searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+          return Promise.resolve(
+            jsonBody({ models: [], has_more: false, next_cursor: null }),
+          )
+        }
+        return Promise.resolve(
+          jsonBody({
+            models: [
+              {
+                endpoint_id: 'fal-ai/flux/dev',
+                openapi: FLUX_OPENAPI,
+                metadata: { category: 'text-to-image' },
+              },
+            ],
+            has_more: false,
+            next_cursor: null,
+          }),
+        )
+      }
+      return Promise.resolve(new Response('nope', { status: 404 }))
+    })
+    await expect(
+      falProvider.fetchSpec({ FAL_KEY: 'test-key' }),
+    ).rejects.toThrow('no row for the endpoint_id lookup')
   })
 })

@@ -326,6 +326,10 @@ describe('fal listModels', () => {
   ): Response {
     const url = new URL(input)
     if (url.hostname === 'fal.ai') return new Response(llms(url.pathname))
+    // The unlisted lookup is its own request. A 404 means the id is gone.
+    if (url.searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+      return new Response('missing', { status: 404 })
+    }
     return url.searchParams.has('endpoint_id')
       ? page(fixtures)
       : page([image, ...listed])
@@ -340,7 +344,7 @@ describe('fal listModels', () => {
     })
     const { models } = await falProvider.listModels({ FAL_KEY: 'k' })
     // Listing, the chat spec page, one llms.txt per chat endpoint, then
-    // the unlisted fal-ai/whisper lookup. The mock page has no whisper row.
+    // the unlisted fal-ai/whisper lookup, which this mock 404s.
     expect(urls).toHaveLength(3 + listed.length)
     expect(urls[0]?.searchParams.has('expand')).toBe(false)
     expect(urls[1]?.searchParams.get('expand')).toBe('openapi-3.0')
@@ -410,6 +414,9 @@ describe('fal listModels', () => {
       const url = new URL(input)
       if (url.hostname === 'fal.ai')
         return Promise.resolve(new Response(NO_TOKEN_PRICE))
+      if (url.searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+        return Promise.resolve(new Response('missing', { status: 404 }))
+      }
       return Promise.resolve(
         url.searchParams.has('endpoint_id')
           ? page(fixtures.slice(1))
@@ -549,6 +556,45 @@ describe('fal listModels', () => {
     expect(
       models.find((model) => model.rawId === 'fal-ai/whisper'),
     ).toMatchObject({ activity: 'audio', deprecated: true })
+  })
+
+  it('throws when the whisper lookup returns a page without that id', async () => {
+    vi.stubGlobal('fetch', (input: string) => {
+      const url = new URL(input)
+      if (url.hostname === 'fal.ai')
+        return Promise.resolve(new Response(NO_TOKEN_PRICE))
+      if (url.searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+        return Promise.resolve(page([]))
+      }
+      return Promise.resolve(
+        url.searchParams.has('endpoint_id')
+          ? page(fixtures)
+          : page([image, ...listed]),
+      )
+    })
+    await expect(falProvider.listModels({ FAL_KEY: 'k' })).rejects.toThrow(
+      'no row for the endpoint_id lookup',
+    )
+  })
+
+  it('throws when a listed model has no category', async () => {
+    vi.stubGlobal('fetch', (input: string) => {
+      const url = new URL(input)
+      if (url.searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+        return Promise.resolve(new Response('missing', { status: 404 }))
+      }
+      return Promise.resolve(
+        page([
+          {
+            endpoint_id: 'fal-ai/bare',
+            metadata: null,
+          },
+        ]),
+      )
+    })
+    await expect(falProvider.listModels({ FAL_KEY: 'k' })).rejects.toThrow(
+      'metadata.category',
+    )
   })
 
   it('fails the poll when the listing itself fails', async () => {

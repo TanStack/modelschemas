@@ -92,6 +92,28 @@ function modelCategory(model: FalApiModel): string | null {
 }
 
 /**
+ * The active search always publishes `metadata.category`. A row that omits
+ * it used to throw on `metadata.category`. Keep that: writing `activity:
+ * null` would clear a stored activity. The unlisted lookup is the one
+ * path that may read the category off the OpenAPI document instead.
+ */
+function listedCategory(model: FalApiModel): string {
+  const category = model.metadata?.category
+  if (typeof category === 'string' && category.length > 0) return category
+  throw new Error(
+    `fal ${model.endpoint_id}: models listing has no metadata.category`,
+  )
+}
+
+/** Listing rows must name a category. An unlisted lookup may take it from OpenAPI. */
+function categoryFor(model: FalApiModel, listedIds: Set<string>): string {
+  if (listedIds.has(model.endpoint_id)) return listedCategory(model)
+  const category = modelCategory(model)
+  if (category !== null) return category
+  throw new Error(`fal ${model.endpoint_id}: unlisted endpoint has no category`)
+}
+
+/**
  * A listing says `deprecated` in metadata. An unlisted row has no metadata;
  * a `retires_at` already in the past is the only deprecation signal left.
  */
@@ -276,7 +298,13 @@ async function appendUnlistedFalModels(
       throw error
     }
     const match = page.find((model) => model.endpoint_id === id)
-    if (!match || seen.has(match.endpoint_id)) continue
+    // A 200 that omits the id is not "gone". Treating it as gone would
+    // drop the row and the poller would emit model.removed.
+    if (!match) {
+      throw new Error(
+        `fal ${id}: models API returned no row for the endpoint_id lookup`,
+      )
+    }
     seen.add(match.endpoint_id)
     extra.push(match)
   }
@@ -385,18 +413,17 @@ async function fetchSpec(env: ProviderSecrets): Promise<SpecFetchResult> {
       ...skippedResult('fal', 'FAL_KEY'),
     }
   }
-  const models = await appendUnlistedFalModels(
-    apiKey,
-    await fetchFalModels(apiKey, true),
-    true,
-  )
+  const crawled = await fetchFalModels(apiKey, true)
+  const crawledIds = new Set(crawled.map((model) => model.endpoint_id))
+  for (const model of crawled) listedCategory(model)
+  const models = await appendUnlistedFalModels(apiKey, crawled, true)
   const specs: Array<OpenApiDocument> = []
   const sources: Array<SpecSource> = []
   const openApiPosted = new Set<string>()
   for (const model of models) {
     if (!model.openapi) continue
-    const category = modelCategory(model)
-    const activity = category === null ? null : falCategoryActivity(category)
+    const category = categoryFor(model, crawledIds)
+    const activity = falCategoryActivity(category)
     if (activity === null) continue
     const spec = model.openapi
     if (hasPostOperation(spec)) openApiPosted.add(model.endpoint_id)
@@ -420,8 +447,8 @@ async function fetchSpec(env: ProviderSecrets): Promise<SpecFetchResult> {
   const warnings: Array<string> = []
   for (const model of models) {
     if (openApiPosted.has(model.endpoint_id)) continue
-    const category = modelCategory(model)
-    const activity = category === null ? null : falCategoryActivity(category)
+    const category = categoryFor(model, crawledIds)
+    const activity = falCategoryActivity(category)
     if (activity === null) continue
     try {
       const discovered = await discoverAsyncApiDocument(model.endpoint_id)
@@ -536,14 +563,15 @@ async function listModels(
     return { models: [], ...skippedResult('fal', 'FAL_KEY') }
   }
   const listedModels = await fetchFalModels(apiKey, false)
+  const listedIds = new Set(listedModels.map((model) => model.endpoint_id))
+  for (const model of listedModels) listedCategory(model)
   // The poll lists without specs (1,500 documents). Chat facts come from
   // the request schema, so fetch the few chat endpoints' specs by id. A
   // failed fetch is the chat rows' alone: they keep their stored chat
   // facts, and the other 1,500 rows still poll.
-  const chat = listedModels.filter((m) => {
-    const category = modelCategory(m)
-    return category !== null && falCategoryActivity(category) === 'chat'
-  })
+  const chat = listedModels.filter(
+    (m) => falCategoryActivity(listedCategory(m)) === 'chat',
+  )
   const chatIds = chat.map((m) => m.endpoint_id)
   const docs = docsRun()
   const chatFacts = await tryDocs(
@@ -608,14 +636,14 @@ async function listModels(
       ...(card ? { pricing: card.source } : {}),
     }
     const { factSources: _listedSources, ...rest } = facts ?? {}
-    const category = modelCategory(m)
+    const category = categoryFor(m, listedIds)
     return {
       rawId: m.endpoint_id,
       displayName: m.metadata?.display_name ?? null,
-      activity: category === null ? null : falCategoryActivity(category),
+      activity: falCategoryActivity(category),
       deprecated: modelDeprecated(m),
       releasedAt: isoToEpochSeconds(m.metadata?.date),
-      ...(category ? { providerMetadata: { category } } : {}),
+      providerMetadata: { category },
       // A chat row with a request schema also carries the flag list every
       // other provider's chat rows do.
       ...rest,
