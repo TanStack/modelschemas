@@ -232,6 +232,29 @@ export function parseMetaModels(
     fail('model page listed no chat models')
   return out
 }
+type TokenMode = 'Standard' | 'Contributor'
+/** Mode columns are named. Meta publishes them in either order. */
+function tokenModeColumns(
+  head: Array<string>,
+): Record<TokenMode, number> | undefined {
+  if (head[0] !== 'Usage' || head.length !== 3) return
+  const found = new Map<TokenMode, number>()
+  for (let index = 1; index < head.length; index++) {
+    const cell = head[index]
+    const mode: TokenMode | undefined =
+      cell === 'Standard mode (per 1M tokens)'
+        ? 'Standard'
+        : cell === 'Contributor mode (per 1M tokens)'
+          ? 'Contributor'
+          : undefined
+    if (!mode || found.has(mode)) return
+    found.set(mode, index)
+  }
+  const standard = found.get('Standard')
+  const contributor = found.get('Contributor')
+  if (standard === undefined || contributor === undefined) return
+  return { Standard: standard, Contributor: contributor }
+}
 export function parseMetaPricing(
   html: string,
   models: Array<ModelInfo>,
@@ -246,13 +269,11 @@ export function parseMetaPricing(
   )
   for (const section of sections(html, 3)) {
     const rows = tables(section.body)[0]
-    if (
-      rows?.[0]?.join('|') ===
-      'Usage|Standard mode (per 1M tokens)|Contributor mode (per 1M tokens)'
-    ) {
+    const tokenCols = tokenModeColumns(rows?.[0] ?? [])
+    if (rows && tokenCols) {
       // "Models: a, b in Standard mode; c in Contributor mode." A section
       // that names no mode must have only one priced column.
-      const columns = new Map<string, number>()
+      const columns = new Map<string, TokenMode | undefined>()
       for (const clause of plain(section.body.split(/<table\b/)[0] ?? '').split(
         ';',
       )) {
@@ -269,7 +290,9 @@ export function parseMetaPricing(
           if (columns.has(id)) fail('duplicate model price')
           columns.set(
             id,
-            modes[0] === 'Contributor' ? 2 : modes[0] === 'Standard' ? 1 : 0,
+            modes[0] === 'Contributor' || modes[0] === 'Standard'
+              ? modes[0]
+              : undefined,
           )
         }
       }
@@ -279,29 +302,31 @@ export function parseMetaPricing(
         Input: 'input_tokens',
         Output: 'output_tokens',
       }
-      const rates: Record<number, Record<string, number>> = { 1: {}, 2: {} }
+      const rates: Record<TokenMode, Record<string, number>> = {
+        Standard: {},
+        Contributor: {},
+      }
       for (const row of rows.slice(1)) {
         const key = meters[row[0] ?? '']
         if (!key || row.length !== 3) fail('unreadable token price')
-        for (const col of [1, 2]) {
-          const cell = row[col] ?? ''
+        for (const mode of ['Standard', 'Contributor'] as const) {
+          const cell = row[tokenCols[mode]] ?? ''
           if (cell === 'Not available') continue
           const price = /^\$(\d+(?:\.\d+)?)$/.exec(cell)
           if (!price) fail('unreadable token price')
-          const target = rates[col]
-          if (target) target[key] = Number(price[1]) / 1e6
+          rates[mode][key] = Number(price[1]) / 1e6
         }
       }
-      const priced = [1, 2].filter(
-        (col) => Object.keys(rates[col] ?? {}).length,
+      const priced = (['Standard', 'Contributor'] as const).filter(
+        (mode) => Object.keys(rates[mode]).length,
       )
       for (const [id, stated] of columns) {
-        const col = stated || (priced.length === 1 ? priced[0] : undefined)
-        if (!col) fail('token price mode unstated')
+        const mode = stated ?? (priced.length === 1 ? priced[0] : undefined)
+        if (!mode) fail('token price mode unstated')
         const tier = tiers.get(id)
-        if (tier && col !== (tier === 'Contributor' ? 2 : 1))
+        if (tier && mode !== tier)
           fail('token price mode disagrees with model tier')
-        const colRates = rates[col] ?? {}
+        const colRates = rates[mode]
         if (!('input_tokens' in colRates) || !('output_tokens' in colRates))
           fail('incomplete token pricing')
         if (cards.has(id)) fail('duplicate model price')
@@ -344,7 +369,8 @@ export function parseMetaPricing(
         const p = /flat \$(\d+(?:\.\d+)?) per generated image/.exec(text)
         if (!p) fail('unreadable image price')
         rates.generated_images = Number(p[1])
-      } else if (rows?.[0]?.[0] === 'Usage') fail('unknown pricing table')
+      } else if (rows?.[0]?.[0] === 'Usage')
+        fail(`unknown pricing table in ${section.name}`)
       else continue
       const card = compileTokenCard(rates, [], source)
       if (!card) fail('uncompilable unit pricing')

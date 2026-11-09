@@ -426,7 +426,69 @@ describe('Meta native docs', () => {
         models,
         { url: META_PRICING, hash: 'fixture', extractedAt: '2026-10-12' },
       ),
-    ).toThrow('unknown pricing table')
+    ).toThrow('unknown pricing table in Muse Wonder')
+  })
+  it('reads token prices when Contributor is the first column', () => {
+    // Trimmed from https://dev.meta.ai/docs/pricing-rate-limits on 2026-11-10.
+    // Decorative attributes removed; cell text is the live table.
+    const html = `<h1 id="pricing">Pricing</h1>
+<h3 id="muse-wonder-pricing">Muse Wonder</h3>
+<p>Model: <code>muse-wonder-1.0</code>.</p>
+<table><thead><tr><th>Usage</th><th>Contributor mode (per 1M tokens)</th><th>Standard mode (per 1M tokens)</th></tr></thead><tbody>
+<tr><td>Cached input</td><td>Not available</td><td>$0.20</td></tr>
+<tr><td>Input</td><td>Not available</td><td>$4.00</td></tr>
+<tr><td>Output</td><td>Not available</td><td>$20.00</td></tr>
+</tbody></table>
+<h3 id="muse-spark-pricing">Muse Spark</h3>
+<p>Models: <code>muse-spark-1.3</code>, <code>muse-spark-1.2</code>, and <code>muse-spark-1.1</code> in Standard mode; <code>muse-spark-1.3-contributor</code> and <code>muse-spark-1.2-contributor</code> in Contributor mode. Muse Spark 1.1 is Standard mode only.</p>
+<table><thead><tr><th>Usage</th><th>Contributor mode (per 1M tokens)</th><th>Standard mode (per 1M tokens)</th></tr></thead><tbody>
+<tr><td>Cached input</td><td>$0.002</td><td>$0.15</td></tr>
+<tr><td>Input</td><td>$0.10</td><td>$1.25</td></tr>
+<tr><td>Output</td><td>$0.20</td><td>$4.25</td></tr>
+</tbody></table>`
+    const models = parseMetaModels(docs[META_MODELS] ?? '', pages)
+    const cards = parseMetaPricing(html, models, {
+      url: META_PRICING,
+      hash: 'live-2026-11-10',
+      extractedAt: '2026-11-10',
+    })
+    expect(cards.get('muse-wonder-1.0')).toMatchObject({
+      tables: {
+        rate: {
+          base: {
+            input_tokens: 4 / 1e6,
+            output_tokens: 20 / 1e6,
+            cache_read_tokens: 0.2 / 1e6,
+          },
+        },
+      },
+    })
+    expect(cards.get('muse-spark-1.3')).toMatchObject({
+      tables: {
+        rate: {
+          base: {
+            input_tokens: 1.25 / 1e6,
+            output_tokens: 4.25 / 1e6,
+            cache_read_tokens: 0.15 / 1e6,
+          },
+        },
+      },
+    })
+    expect(cards.get('muse-spark-1.3-contributor')).toMatchObject({
+      tables: {
+        rate: {
+          base: {
+            input_tokens: 0.1 / 1e6,
+            output_tokens: 0.2 / 1e6,
+            cache_read_tokens: 0.002 / 1e6,
+          },
+        },
+      },
+    })
+    expect(cards.get('muse-spark-1.1')).toEqual(cards.get('muse-spark-1.3'))
+    expect(cards.get('muse-spark-1.2-contributor')).toEqual(
+      cards.get('muse-spark-1.3-contributor'),
+    )
   })
   it('fails when a pay-as-you-go chat ID gets no token price', () => {
     const models = parseMetaModels(docs[META_MODELS] ?? '', pages)
