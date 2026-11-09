@@ -339,13 +339,19 @@ describe('fal listModels', () => {
       return Promise.resolve(respond(input, () => NO_TOKEN_PRICE))
     })
     const { models } = await falProvider.listModels({ FAL_KEY: 'k' })
-    // Listing, the chat spec page, then one llms.txt per chat endpoint.
-    expect(urls).toHaveLength(2 + listed.length)
+    // Listing, the chat spec page, one llms.txt per chat endpoint, then
+    // the unlisted fal-ai/whisper lookup. The mock page has no whisper row.
+    expect(urls).toHaveLength(3 + listed.length)
     expect(urls[0]?.searchParams.has('expand')).toBe(false)
     expect(urls[1]?.searchParams.get('expand')).toBe('openapi-3.0')
     expect(urls[1]?.searchParams.getAll('endpoint_id').sort()).toEqual(
       fixtures.map((m) => m.endpoint_id).sort(),
     )
+    const whisperLookup = urls.find(
+      (url) => url.searchParams.get('endpoint_id') === 'fal-ai/whisper',
+    )
+    expect(whisperLookup?.searchParams.get('expand')).toBe('openapi-3.0')
+    expect(models.some((model) => model.rawId === 'fal-ai/whisper')).toBe(false)
     const byId = new Map(models.map((m) => [m.rawId, m]))
     expect(byId.get('fal-ai/flux/dev')).toMatchObject({
       activity: 'image',
@@ -435,6 +441,114 @@ describe('fal listModels', () => {
         expect(model.absent).toBeUndefined()
       }
     }
+  })
+
+  it('indexes fal-ai/whisper from a direct lookup when the active search omits it', async () => {
+    const whisper = {
+      endpoint_id: 'fal-ai/whisper',
+      metadata: null,
+      retires_at: null,
+      openapi: {
+        openapi: '3.0.4',
+        info: {
+          title: 'Whisper',
+          'x-fal-metadata': {
+            category: 'speech-to-text',
+            endpointId: 'fal-ai/whisper',
+          },
+        },
+        paths: {
+          '/': {
+            post: {
+              operationId: 'whisper',
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      },
+    }
+    vi.stubGlobal('fetch', (input: string) => {
+      const url = new URL(input)
+      if (url.hostname === 'fal.ai')
+        return Promise.resolve(new Response(NO_TOKEN_PRICE))
+      if (url.searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+        return Promise.resolve(page([whisper]))
+      }
+      return Promise.resolve(
+        url.searchParams.has('endpoint_id')
+          ? page(fixtures)
+          : page([image, ...listed]),
+      )
+    })
+    const { models } = await falProvider.listModels({ FAL_KEY: 'k' })
+    expect(
+      models.find((model) => model.rawId === 'fal-ai/whisper'),
+    ).toMatchObject({
+      activity: 'audio',
+      deprecated: false,
+      displayName: null,
+      providerMetadata: { category: 'speech-to-text' },
+    })
+    expect(
+      models.filter((model) => model.rawId === 'fal-ai/whisper'),
+    ).toHaveLength(1)
+  })
+
+  it('skips fal-ai/whisper when the direct lookup 404s', async () => {
+    vi.stubGlobal('fetch', (input: string) => {
+      const url = new URL(input)
+      if (url.hostname === 'fal.ai')
+        return Promise.resolve(new Response(NO_TOKEN_PRICE))
+      if (url.searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+        return Promise.resolve(new Response('missing', { status: 404 }))
+      }
+      return Promise.resolve(
+        url.searchParams.has('endpoint_id')
+          ? page(fixtures)
+          : page([image, ...listed]),
+      )
+    })
+    const { models } = await falProvider.listModels({ FAL_KEY: 'k' })
+    expect(models.some((model) => model.rawId === 'fal-ai/whisper')).toBe(false)
+    expect(models).toHaveLength(listed.length + 1)
+  })
+
+  it('marks an unlisted endpoint deprecated once retires_at is past', async () => {
+    vi.stubGlobal('fetch', (input: string) => {
+      const url = new URL(input)
+      if (url.hostname === 'fal.ai')
+        return Promise.resolve(new Response(NO_TOKEN_PRICE))
+      if (url.searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+        return Promise.resolve(
+          page([
+            {
+              endpoint_id: 'fal-ai/whisper',
+              metadata: null,
+              retires_at: '2020-01-01T00:00:00.000Z',
+              openapi: {
+                info: { 'x-fal-metadata': { category: 'speech-to-text' } },
+                paths: {
+                  '/': {
+                    post: {
+                      responses: { '200': { description: 'ok' } },
+                    },
+                  },
+                },
+              },
+            },
+          ]),
+        )
+      }
+      return Promise.resolve(
+        url.searchParams.has('endpoint_id')
+          ? page(fixtures)
+          : page([image, ...listed]),
+      )
+    })
+    const { models } = await falProvider.listModels({ FAL_KEY: 'k' })
+    expect(
+      models.find((model) => model.rawId === 'fal-ai/whisper'),
+    ).toMatchObject({ activity: 'audio', deprecated: true })
   })
 
   it('fails the poll when the listing itself fails', async () => {

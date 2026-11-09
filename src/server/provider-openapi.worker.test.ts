@@ -391,6 +391,120 @@ describe('assembleProviderOpenApi', () => {
     expect(info.description).toContain('x-modelschemas-model')
   })
 
+  it('includes a deprecated model with stored schemas in its activity document', async () => {
+    await db
+      .insert(endpoints)
+      .values({
+        id: 'fal/fal-ai/veo3.1',
+        providerId: 'fal',
+        activity: 'video',
+        method: 'POST',
+        path: '/fal-ai/veo3.1',
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(models)
+      .values({
+        id: 'fal-fal-ai-veo3-1',
+        providerId: 'fal',
+        rawId: 'fal-ai/veo3.1',
+        activity: 'video',
+        providerMetadata: { category: 'text-to-video' },
+        deprecatedAt: NOW,
+        firstSeenAt: NOW,
+        lastSeenAt: NOW,
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(schemaVersions)
+      .values([
+        {
+          id: 'fal/fal-ai/veo3.1:input',
+          endpointId: 'fal/fal-ai/veo3.1',
+          kind: 'input',
+          contentHash: '1'.repeat(64),
+          schema: JSON.stringify({
+            type: 'object',
+            properties: { prompt: { type: 'string' } },
+          }),
+          createdAt: NOW,
+        },
+        {
+          id: 'fal/fal-ai/veo3.1:output',
+          endpointId: 'fal/fal-ai/veo3.1',
+          kind: 'output',
+          contentHash: '2'.repeat(64),
+          schema: JSON.stringify({
+            type: 'object',
+            properties: { video: { type: 'object' } },
+          }),
+          createdAt: NOW,
+        },
+      ])
+      .onConflictDoNothing()
+
+    const bare = await assembleProviderOpenApi(db, 'fal')
+    expect(bare.ok).toBe(true)
+    if (!bare.ok) return
+    const bareEnum = (
+      bare.document.paths as Record<
+        string,
+        {
+          post: {
+            parameters: Array<{
+              name: string
+              schema?: { enum?: Array<string> }
+            }>
+          }
+        }
+      >
+    )['/{endpoint_id}']?.post.parameters.find(
+      (parameter) => parameter.name === 'endpoint_id',
+    )?.schema?.enum
+    expect(bareEnum).not.toContain('fal-ai/veo3.1')
+
+    const video = await assembleProviderOpenApi(db, 'fal', {
+      activity: 'video',
+    })
+    expect(video.ok).toBe(true)
+    if (!video.ok) return
+    const post = (
+      video.document.paths as Record<
+        string,
+        {
+          post?: {
+            parameters?: Array<{ schema?: { enum?: Array<string> } }>
+            requestBody?: {
+              content: {
+                'application/json': { schema: { $ref?: string } }
+              }
+            }
+          }
+        }
+      >
+    )['/{endpoint_id}']?.post
+    expect(post?.parameters?.[0]?.schema?.enum).toEqual(['fal-ai/veo3.1'])
+    expect(post?.requestBody?.content['application/json'].schema.$ref).toBe(
+      '#/components/schemas/input_fal-ai_veo3.1',
+    )
+    const schemas = (
+      video.document.components as {
+        schemas: Record<
+          string,
+          { 'x-modelschemas-model'?: string; properties?: unknown }
+        >
+      }
+    ).schemas
+    expect(schemas['input_fal-ai_veo3.1']).toMatchObject({
+      'x-modelschemas-model': 'fal-ai/veo3.1',
+      properties: { prompt: { type: 'string' } },
+    })
+    expect(schemas['output_fal-ai_veo3.1']).toMatchObject({
+      'x-modelschemas-model': 'fal-ai/veo3.1',
+      properties: { video: { type: 'object' } },
+    })
+  })
+
   it('leaves a model with no generation endpoint out of the enum', async () => {
     await db
       .insert(models)
@@ -1253,12 +1367,42 @@ describe('assembleProviderOpenApi', () => {
     const byActivity = await assembleProviderOpenApi(db, 'fal', {
       activity: 'video',
     })
-    expect(byActivity).toMatchObject({
+    expect(byActivity.ok).toBe(true)
+    if (!byActivity.ok) return
+    const videoEnum = (
+      byActivity.document.paths as Record<
+        string,
+        {
+          post?: {
+            parameters?: Array<{ schema?: { enum?: Array<string> } }>
+          }
+        }
+      >
+    )['/{endpoint_id}']?.post?.parameters?.[0]?.schema?.enum
+    expect(videoEnum).toEqual(['fal-ai/veo3.1'])
+    expect(videoEnum).not.toContain('minimax/h3-max/director')
+
+    await db
+      .insert(models)
+      .values({
+        id: 'fal-async-only',
+        providerId: 'fal',
+        rawId: 'fal-ai/async-only',
+        activity: 'moderation',
+        capabilities: { asyncapi: true },
+        firstSeenAt: NOW,
+        lastSeenAt: NOW,
+      })
+      .onConflictDoNothing()
+    const onlyAsync = await assembleProviderOpenApi(db, 'fal', {
+      activity: 'moderation',
+    })
+    expect(onlyAsync).toMatchObject({
       ok: false,
       status: 400,
       code: 'spec_requires_selector',
     })
-    if (!byActivity.ok) expect(byActivity.message).toContain('AsyncAPI')
+    if (!onlyAsync.ok) expect(onlyAsync.message).toContain('AsyncAPI')
   })
 
   it('404s unknown provider and unknown model', async () => {

@@ -51,15 +51,56 @@ export const FAL_ACTIVITY_MARKER = 'x-modelschemas-fal-activity'
 interface FalApiModel {
   endpoint_id: string
   openapi?: OpenApiDocument
+  /**
+   * Null on rows the active search omits. Category then lives on the
+   * embedded OpenAPI document (`info['x-fal-metadata'].category`), which
+   * arrives only when the request sets `expand=openapi-3.0`.
+   */
   metadata: {
     display_name?: string
-    category: string
+    category?: string
     description?: string
     status?: 'active' | 'inactive' | 'deprecated'
     /** Listing/release date, ISO 8601. */
     date?: string
     [key: string]: unknown
+  } | null
+  retires_at?: string | null
+}
+
+/**
+ * Ids the active models search never pages, while `endpoint_id` lookup
+ * still serves queue OpenAPI. `fal-ai/whisper` is the default transcription
+ * model in TanStack AI. One id per request: a missing id 404s the batch.
+ */
+const FAL_UNLISTED_ENDPOINT_IDS = ['fal-ai/whisper']
+
+function openApiCategory(model: FalApiModel): string | null {
+  const meta = model.openapi?.info?.['x-fal-metadata']
+  if (typeof meta !== 'object' || meta === null || !('category' in meta)) {
+    return null
   }
+  const category = meta.category
+  return typeof category === 'string' && category.length > 0 ? category : null
+}
+
+/** Listing category, else the category stamped on the embedded OpenAPI. */
+function modelCategory(model: FalApiModel): string | null {
+  const listed = model.metadata?.category
+  if (typeof listed === 'string' && listed.length > 0) return listed
+  return openApiCategory(model)
+}
+
+/**
+ * A listing says `deprecated` in metadata. An unlisted row has no metadata;
+ * a `retires_at` already in the past is the only deprecation signal left.
+ */
+function modelDeprecated(model: FalApiModel): boolean {
+  if (model.metadata?.status === 'deprecated') return true
+  if (model.metadata != null) return false
+  if (typeof model.retires_at !== 'string') return false
+  const at = Date.parse(model.retires_at)
+  return Number.isFinite(at) && at <= Date.now()
 }
 
 interface FalApiResponse {
@@ -134,7 +175,14 @@ const FETCH_TIMEOUT_MS = 60_000
 const ENDPOINT_FILTER_MAX = 50
 
 /** Non-retryable upstream failure — thrown through the retry loop as-is. */
-class FalFetchError extends Error {}
+class FalFetchError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+  }
+}
 
 /**
  * The paginated crawl is ~30 requests per pass and runs from both cron
@@ -158,7 +206,10 @@ export async function fetchPageWithRetry(
       if (response.ok) return (await response.json()) as FalApiResponse
       lastFailure = `${String(response.status)} ${response.statusText}`
       if (!RETRYABLE_STATUSES.has(response.status)) {
-        throw new FalFetchError(`fal models fetch failed: ${lastFailure}`)
+        throw new FalFetchError(
+          `fal models fetch failed: ${lastFailure}`,
+          response.status,
+        )
       }
       const retryAfter = Number(response.headers.get('retry-after'))
       if (Number.isFinite(retryAfter) && retryAfter > 0) {
@@ -200,6 +251,36 @@ async function fetchFalModels(
     cursor = data.has_more ? data.next_cursor : null
   } while (cursor)
   return allModels
+}
+
+/**
+ * Append {@link FAL_UNLISTED_ENDPOINT_IDS} that the active crawl did not
+ * return. Only a 404 (the id is gone) is skipped, so the row is marked
+ * removed. Any other failure throws: skipping it would also drop the row,
+ * and the poller would emit a false `model.removed`.
+ */
+async function appendUnlistedFalModels(
+  apiKey: string,
+  models: Array<FalApiModel>,
+  expandOpenApi: boolean,
+): Promise<Array<FalApiModel>> {
+  const seen = new Set(models.map((model) => model.endpoint_id))
+  const extra: Array<FalApiModel> = []
+  for (const id of FAL_UNLISTED_ENDPOINT_IDS) {
+    if (seen.has(id)) continue
+    let page: Array<FalApiModel>
+    try {
+      page = await fetchFalModels(apiKey, expandOpenApi, [id])
+    } catch (error) {
+      if (error instanceof FalFetchError && error.status === 404) continue
+      throw error
+    }
+    const match = page.find((model) => model.endpoint_id === id)
+    if (!match || seen.has(match.endpoint_id)) continue
+    seen.add(match.endpoint_id)
+    extra.push(match)
+  }
+  return extra.length === 0 ? models : [...models, ...extra]
 }
 
 function annotateOperations(spec: OpenApiDocument, activity: Activity): void {
@@ -304,13 +385,18 @@ async function fetchSpec(env: ProviderSecrets): Promise<SpecFetchResult> {
       ...skippedResult('fal', 'FAL_KEY'),
     }
   }
-  const models = await fetchFalModels(apiKey, true)
+  const models = await appendUnlistedFalModels(
+    apiKey,
+    await fetchFalModels(apiKey, true),
+    true,
+  )
   const specs: Array<OpenApiDocument> = []
   const sources: Array<SpecSource> = []
   const openApiPosted = new Set<string>()
   for (const model of models) {
     if (!model.openapi) continue
-    const activity = falCategoryActivity(model.metadata.category)
+    const category = modelCategory(model)
+    const activity = category === null ? null : falCategoryActivity(category)
     if (activity === null) continue
     const spec = model.openapi
     if (hasPostOperation(spec)) openApiPosted.add(model.endpoint_id)
@@ -334,7 +420,8 @@ async function fetchSpec(env: ProviderSecrets): Promise<SpecFetchResult> {
   const warnings: Array<string> = []
   for (const model of models) {
     if (openApiPosted.has(model.endpoint_id)) continue
-    const activity = falCategoryActivity(model.metadata.category)
+    const category = modelCategory(model)
+    const activity = category === null ? null : falCategoryActivity(category)
     if (activity === null) continue
     try {
       const discovered = await discoverAsyncApiDocument(model.endpoint_id)
@@ -448,14 +535,15 @@ async function listModels(
   if (!apiKey) {
     return { models: [], ...skippedResult('fal', 'FAL_KEY') }
   }
-  const falModels = await fetchFalModels(apiKey, false)
+  const listedModels = await fetchFalModels(apiKey, false)
   // The poll lists without specs (1,500 documents). Chat facts come from
   // the request schema, so fetch the few chat endpoints' specs by id. A
   // failed fetch is the chat rows' alone: they keep their stored chat
   // facts, and the other 1,500 rows still poll.
-  const chat = falModels.filter(
-    (m) => falCategoryActivity(m.metadata.category) === 'chat',
-  )
+  const chat = listedModels.filter((m) => {
+    const category = modelCategory(m)
+    return category !== null && falCategoryActivity(category) === 'chat'
+  })
   const chatIds = chat.map((m) => m.endpoint_id)
   const docs = docsRun()
   const chatFacts = await tryDocs(
@@ -483,7 +571,7 @@ async function listModels(
           falChatFacts(
             {
               endpoint_id: m.endpoint_id,
-              description: m.metadata.description,
+              description: m.metadata?.description,
               openapi: chatSpecs.get(m.endpoint_id),
             },
             FAL_MODELS_URL,
@@ -501,6 +589,10 @@ async function listModels(
     'requestMap',
   )
   const tokenPrices = await loadChatTokenPrices(chatIds, docs, kv)
+  // After the chat spec request, so that request stays the second models
+  // call. The lookup expands OpenAPI: unlisted rows carry no metadata, and
+  // the category is on the document.
+  const falModels = await appendUnlistedFalModels(apiKey, listedModels, true)
   const models: Array<ModelInfo> = falModels.map((m) => {
     const facts = chatFacts?.get(m.endpoint_id)
     const price = tokenPrices.get(m.endpoint_id)
@@ -516,13 +608,14 @@ async function listModels(
       ...(card ? { pricing: card.source } : {}),
     }
     const { factSources: _listedSources, ...rest } = facts ?? {}
+    const category = modelCategory(m)
     return {
       rawId: m.endpoint_id,
-      displayName: m.metadata.display_name ?? null,
-      activity: falCategoryActivity(m.metadata.category),
-      deprecated: m.metadata.status === 'deprecated',
-      releasedAt: isoToEpochSeconds(m.metadata.date),
-      providerMetadata: { category: m.metadata.category },
+      displayName: m.metadata?.display_name ?? null,
+      activity: category === null ? null : falCategoryActivity(category),
+      deprecated: modelDeprecated(m),
+      releasedAt: isoToEpochSeconds(m.metadata?.date),
+      ...(category ? { providerMetadata: { category } } : {}),
       // A chat row with a request schema also carries the flag list every
       // other provider's chat rows do.
       ...rest,
