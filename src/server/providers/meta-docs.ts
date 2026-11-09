@@ -370,11 +370,14 @@ export function parseMetaPricing(
         const colRates = sizeCols ? base : rates[mode]
         if (!('input_tokens' in colRates) || !('output_tokens' in colRates))
           fail('incomplete token pricing')
+        // A lever the long-context column leaves out would bill at the base
+        // rate (compileTokenCard tiers fall back), so both columns must
+        // price the same levers.
         if (
           sizeCols &&
-          (!('input_tokens' in over) || !('output_tokens' in over))
+          Object.keys(over).sort().join() !== Object.keys(base).sort().join()
         )
-          fail('incomplete token pricing')
+          fail('prompt-size columns price different levers')
         if (cards.has(id)) fail('duplicate model price')
         const card = sizeCols
           ? compileTokenCard(

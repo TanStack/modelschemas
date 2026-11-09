@@ -586,6 +586,18 @@ describe('Meta native docs', () => {
       ),
     ).toThrow('prompt-size thresholds disagree')
   })
+  it('fails when the long-context column leaves out a lever', () => {
+    expect(() =>
+      parseMetaPricing(
+        museEmberPricing.replace(
+          '<td>$0.004</td><td>$0.012</td>',
+          '<td>$0.004</td><td>Not available</td>',
+        ),
+        [emberModel('Standard')],
+        emberSource,
+      ),
+    ).toThrow('prompt-size columns price different levers')
+  })
   it('fails when a prompt-size header does not parse', () => {
     expect(() =>
       parseMetaPricing(
