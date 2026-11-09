@@ -127,15 +127,27 @@ interface YuanQuote {
 }
 /**
  * A plain cell is `<n>元`. It may also state the cache-hit input rate:
- * `13元 缓存命中输入：1.3元`. Any other suffix throws.
+ * `13元 缓存命中输入：1.3元`.
+ *
+ * `原价2元 （限时2.5折）` states a list price and the share billed while
+ * the promo runs (N折 = N/10 of list, so 2.5折 of 2元 is 0.5元). The cell
+ * names no end, so the card carries no `expiresAt` (#552). Any other promo
+ * wording throws.
  */
 function plainQuote(text: string): YuanQuote {
   const match =
     /^(\d+(?:\.\d+)?)元(?:\s+缓存命中输入：(\d+(?:\.\d+)?)元)?$/.exec(text)
-  if (!match) fail(`unreadable RMB token quote: ${text}`)
-  const quote: YuanQuote = { rate: yuanPerMillion(match[1]!) }
-  if (match[2] !== undefined) quote.cacheRead = yuanPerMillion(match[2])
-  return quote
+  if (match) {
+    const quote: YuanQuote = { rate: yuanPerMillion(match[1]!) }
+    if (match[2] !== undefined) quote.cacheRead = yuanPerMillion(match[2])
+    return quote
+  }
+  const promo = /^原价(\d+(?:\.\d+)?)元\s*（限时(\d+(?:\.\d+)?)折）$/.exec(text)
+  if (!promo) fail(`unreadable RMB token quote: ${text}`)
+  const fold = Number(promo[2])
+  // 10折 is the list price. Above that, or a zero fold, is not this wording.
+  if (!(fold > 0) || fold > 10) fail(`unreadable RMB token quote: ${text}`)
+  return { rate: yuanPerMillion(String(Number(promo[1]) * (fold / 10))) }
 }
 /**
  * One quote per prompt-size floor. A cell may tier itself, as MiniMax-M3's

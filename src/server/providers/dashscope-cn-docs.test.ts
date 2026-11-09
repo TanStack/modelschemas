@@ -214,6 +214,39 @@ describe('DashScope China native source parsing', () => {
       'unreadable RMB token quote: 13元 未知后缀：1.3元',
     )
   })
+  it('bills 原价N元 （限时X折） at the fold of list price, with no invented end', () => {
+    const cell = '原价2元 （限时2.5折）'
+    const quoted = (
+      input: string,
+      output = '原价6元 （限时2.5折）',
+    ): CnDoc => ({
+      ...prices,
+      text: `## 文本生成-第三方模型\n<Tabs><Tab title="华北2（北京）"><table><tr><th>模型 ID（Model ID）</th><th>输入单价（每百万Token）</th><th>输出单价（每百万Token）</th></tr><tr><td>antdigital/Ling-3.1-flash</td><td>${input}</td><td>${output}</td></tr></table></Tab></Tabs>`,
+    })
+    const [row] = cnPriceModels(quoted(cell))
+    const card = rateCardSchema.parse(row!.pricing)
+    expect(row!.rawId).toBe('antdigital/Ling-3.1-flash')
+    expect(cardCurrency(card)).toBe('CNY')
+    expect(card.source.expiresAt).toBeUndefined()
+    expect(
+      price(card, {}, { input_tokens: 1_000_000, output_tokens: 0 }),
+    ).toBeCloseTo(0.5)
+    expect(
+      price(card, {}, { input_tokens: 0, output_tokens: 1_000_000 }),
+    ).toBeCloseTo(1.5)
+    const eight = rateCardSchema.parse(
+      cnPriceModels(quoted('原价2元 （限时8折）', '8元'))[0]!.pricing,
+    )
+    expect(
+      price(eight, {}, { input_tokens: 1_000_000, output_tokens: 0 }),
+    ).toBeCloseTo(1.6)
+    expect(() => cnPriceModels(quoted('原价2元 （限时优惠）'))).toThrow(
+      'unreadable RMB token quote: 原价2元 （限时优惠）',
+    )
+    expect(() =>
+      cnPriceModels(quoted('原价2元 （限时2.5折至2026-12-31）')),
+    ).toThrow('unreadable RMB token quote: 原价2元 （限时2.5折至2026-12-31）')
+  })
   it('reads a price cell that tiers itself by prompt size', () => {
     const tiered = (input: string, output: string): CnDoc => ({
       ...prices,
