@@ -191,6 +191,29 @@ describe('DashScope China native source parsing', () => {
       }),
     ).toThrow('no Beijing')
   })
+  it('reads a cache-hit input price stated in the same cell', () => {
+    const cell = '13元 缓存命中输入：1.3元'
+    const quoted = (input: string): CnDoc => ({
+      ...prices,
+      text: `## 文本生成\n<Tabs><Tab title="华北2（北京）"><table><tr><th>模型 ID（Model ID）</th><th>模式</th><th>输入单价（每百万Token）</th><th>输出单价（每百万Token）</th></tr><tr><td>kimi/kimi-k3.1-pro</td><td>思考与非思考（默认开启思考）</td><td>${input}</td><td>68元</td></tr></table></Tab></Tabs>`,
+    })
+    const [row] = cnPriceModels(quoted(cell))
+    const card = rateCardSchema.parse(row!.pricing)
+    expect(cardCurrency(card)).toBe('CNY')
+    expect(
+      price(card, {}, { input_tokens: 1_000_000, output_tokens: 0 }),
+    ).toBeCloseTo(13)
+    expect(
+      price(
+        card,
+        {},
+        { input_tokens: 0, cache_read_tokens: 1_000_000, output_tokens: 0 },
+      ),
+    ).toBeCloseTo(1.3)
+    expect(() => cnPriceModels(quoted('13元 未知后缀：1.3元'))).toThrow(
+      'unreadable RMB token quote: 13元 未知后缀：1.3元',
+    )
+  })
   it('reads a price cell that tiers itself by prompt size', () => {
     const tiered = (input: string, output: string): CnDoc => ({
       ...prices,

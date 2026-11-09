@@ -110,20 +110,42 @@ function ownSource(doc: CnDoc, path: string): FactSource {
     path,
   }
 }
+function yuanPerMillion(raw: string): number {
+  const value = Number(raw) / 1e6
+  if (!Number.isFinite(value) || value < 0) fail('invalid RMB token quote')
+  return value
+}
 function amount(text: string): number {
   const match = /^(\d+(?:\.\d+)?)元$/.exec(text)
   if (!match) fail(`unreadable RMB token quote: ${text}`)
-  const value = Number(match[1]) / 1e6
-  if (!Number.isFinite(value) || value < 0) fail('invalid RMB token quote')
-  return value
+  return yuanPerMillion(match[1]!)
+}
+interface YuanQuote {
+  rate: number
+  /** Cache-hit input, only when the same cell states it. */
+  cacheRead?: number
+}
+/**
+ * A plain cell is `<n>元`. It may also state the cache-hit input rate:
+ * `13元 缓存命中输入：1.3元`. Any other suffix throws.
+ */
+function plainQuote(text: string): YuanQuote {
+  const match =
+    /^(\d+(?:\.\d+)?)元(?:\s+缓存命中输入：(\d+(?:\.\d+)?)元)?$/.exec(text)
+  if (!match) fail(`unreadable RMB token quote: ${text}`)
+  const quote: YuanQuote = { rate: yuanPerMillion(match[1]!) }
+  if (match[2] !== undefined) quote.cacheRead = yuanPerMillion(match[2])
+  return quote
 }
 /**
  * One quote per prompt-size floor. A cell may tier itself, as MiniMax-M3's
  * does: "输入不超过 512k Token：2.1元 输入超过 512k Token：4.2元".
+ * The cache-hit suffix is read only on a plain cell; a tiered cell that
+ * carries any other text still throws.
  */
-function amounts(cell: string): Map<number, number> {
+function amounts(cell: string): Map<number, YuanQuote> {
   const text = cnText(cell)
-  if (!/Token：/.test(text)) return new Map([[0, amount(text)]])
+  if (!/Token：/.test(text)) return new Map([[0, plainQuote(text)]])
   const match =
     /^输入不超过\s*(\d+(?:\.\d+)?)([KM])\s*Token：(\S+)\s+输入超过\s*(\d+(?:\.\d+)?)([KM])\s*Token：(\S+)$/i.exec(
       text,
@@ -134,8 +156,8 @@ function amounts(cell: string): Map<number, number> {
   if (!Number.isSafeInteger(bound) || bound <= 0)
     fail('invalid tiered token bound')
   return new Map([
-    [0, amount(match[3]!)],
-    [bound, amount(match[6]!)],
+    [0, { rate: amount(match[3]!) }],
+    [bound, { rate: amount(match[6]!) }],
   ])
 }
 function floor(cell: string): number {
@@ -270,8 +292,15 @@ export function cnPriceModels(doc: CnDoc): ModelInfo[] {
         if (input.size > 1 && rangeAt >= 0)
           fail(`tiered price cell inside a token range row ${ids.join(',')}`)
         for (const [cellFloor, inputRate] of input) {
-          const rates: Record<string, number> = { input_tokens: inputRate }
-          if (output) rates.output_tokens = output.get(cellFloor)!
+          const rates: Record<string, number> = {
+            input_tokens: inputRate.rate,
+          }
+          if (inputRate.cacheRead !== undefined)
+            rates.cache_read_tokens = inputRate.cacheRead
+          const outputRate = output?.get(cellFloor)
+          if (outputRate?.cacheRead !== undefined)
+            fail(`cached-input quote on an output price ${ids.join(',')}`)
+          if (outputRate) rates.output_tokens = outputRate.rate
           const quote: Quoted = {
             models: ids,
             mode: modeAt >= 0 ? cnText(row[modeAt]!) : '',
