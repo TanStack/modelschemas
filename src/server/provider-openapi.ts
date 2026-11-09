@@ -424,17 +424,19 @@ interface QueueModel {
   capabilities: unknown
 }
 
-/** Live rows for a queue document, narrowed to one activity when given. */
+/**
+ * Rows for a queue document. `?activity=` includes deprecated models in
+ * that activity: the schema index still lists their endpoints, and a
+ * generated client needs those bodies. The bare document stays live-only.
+ */
 async function loadQueueModels(
   db: Db,
   providerId: string,
   activity: Activity | undefined,
 ): Promise<Array<QueueModel>> {
-  const conditions: Array<SQL> = [
-    eq(models.providerId, providerId),
-    isNull(models.deprecatedAt),
-  ]
+  const conditions: Array<SQL> = [eq(models.providerId, providerId)]
   if (activity) conditions.push(eq(models.activity, activity))
+  else conditions.push(isNull(models.deprecatedAt))
   return db
     .select({
       rawId: models.rawId,
@@ -1006,9 +1008,10 @@ export function operationsFor(
  * model-grained providers; a provider-grained document is never capped by
  * path count — client generation needs the whole generation surface (#560).
  * A model-grained queue provider (FAL) with no `?model=` is one queue
- * document: `endpoint_id` enumerates every live model with an input schema;
- * `?activity=` narrows the enum and inlines each model's own body schema
- * (up to {@link MAX_QUEUE_SPEC_PATHS}).
+ * document: `endpoint_id` enumerates every model with an input schema.
+ * The bare document is live models only. `?activity=` includes deprecated
+ * models in that activity and inlines each model's own body schema
+ * (up to {@link MAX_QUEUE_SPEC_PATHS}). AsyncAPI rows stay out.
  */
 export async function assembleProviderOpenApi(
   db: Db,
@@ -1231,7 +1234,7 @@ export async function assembleProviderOpenApi(
       title: `${config?.displayName ?? providerId} (modelschemas)`,
       version: revision,
       description: queue
-        ? `Generation-only OpenAPI assembled by modelschemas from live endpoint schemas. Call this provider directly with your own key — this is not a proxy. One queue client: endpoint_id is the model raw id${lean ? "; bodies are untyped here, pass ?activity= to inline each model's own schema" : ", and each component schema is that model's own body (x-modelschemas-model)"}.`
+        ? `Generation-only OpenAPI assembled by modelschemas from stored endpoint schemas. Call this provider directly with your own key — this is not a proxy. One queue client: endpoint_id is the model raw id${lean ? "; bodies are untyped here, pass ?activity= to inline each model's own schema" : ", and each component schema is that model's own body (x-modelschemas-model)"}.`
         : `Generation-only OpenAPI assembled by modelschemas from live endpoint schemas. Call this provider directly with your own key — this is not a proxy.`,
     },
     servers: connect.servers,

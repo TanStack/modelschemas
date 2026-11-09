@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import directorAsyncApi from '../ingest/fixtures/fal-minimax-h3-max-director.asyncapi.json'
 import {
+  FAL_ACTIVITY_MARKER,
   falAppSlug,
   falAsyncApiUrl,
   falLlmsTxtUrl,
@@ -283,6 +284,72 @@ describe('fal AsyncAPI discovery', () => {
     expect(fetched.skipped).toBeUndefined()
     expect(fetched.specs).toEqual([])
     expect(fetched.bundledEndpoints).toEqual([])
+    expect(fetched.asyncApiRawIds).toEqual([])
+  })
+
+  it('ingests fal-ai/whisper from a direct lookup when metadata is null', async () => {
+    const whisperOpenApi = {
+      openapi: '3.0.4',
+      info: {
+        title: 'Whisper',
+        'x-fal-metadata': {
+          category: 'speech-to-text',
+          endpointId: 'fal-ai/whisper',
+        },
+      },
+      paths: {
+        '/': {
+          post: {
+            operationId: 'whisper',
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+    }
+    fetchMock.mockImplementation((input) => {
+      const url = requestUrl(input)
+      if (url.startsWith('https://api.fal.ai/v1/models')) {
+        const parsed = new URL(url)
+        if (parsed.searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+          return Promise.resolve(
+            jsonBody({
+              models: [
+                {
+                  endpoint_id: 'fal-ai/whisper',
+                  metadata: null,
+                  openapi: whisperOpenApi,
+                },
+              ],
+              has_more: false,
+              next_cursor: null,
+            }),
+          )
+        }
+        return Promise.resolve(
+          jsonBody({
+            models: [
+              {
+                endpoint_id: 'fal-ai/flux/dev',
+                openapi: FLUX_OPENAPI,
+                metadata: { category: 'text-to-image' },
+              },
+            ],
+            has_more: false,
+            next_cursor: null,
+          }),
+        )
+      }
+      return Promise.resolve(new Response('nope', { status: 404 }))
+    })
+
+    const fetched = await falProvider.fetchSpec({ FAL_KEY: 'test-key' })
+    const whisper = fetched.specs.find(
+      (spec) => spec.info?.['x-fal-endpoint-id'] === 'fal-ai/whisper',
+    )
+    expect(whisper).toBeDefined()
+    const post = whisper?.paths?.['/']?.post
+    expect(post?.[FAL_ACTIVITY_MARKER]).toBe('audio')
+    expect(fetched.specs).toHaveLength(2)
     expect(fetched.asyncApiRawIds).toEqual([])
   })
 })
