@@ -255,6 +255,36 @@ function tokenModeColumns(
   if (standard === undefined || contributor === undefined) return
   return { Standard: standard, Contributor: contributor }
 }
+/**
+ * Muse Ember prices the whole request from its input size, cached tokens
+ * included. The two headers name the same threshold: at or below is the
+ * base column, over it is the long-context column.
+ */
+function promptSizeColumns(
+  head: Array<string>,
+): { threshold: number; upTo: number; over: number } | undefined {
+  if (head[0] !== 'Usage' || head.length !== 3) return
+  const attempt = /^(?:Up to|Over)\b.*\binput tokens \(per 1M tokens\)$/
+  const exact = /^(Up to|Over) (\d+)K input tokens \(per 1M tokens\)$/
+  const cells = [head[1] ?? '', head[2] ?? '']
+  if (!cells.some((cell) => attempt.test(cell))) return
+  const found = new Map<'Up to' | 'Over', { index: number; tokens: number }>()
+  for (let index = 0; index < cells.length; index++) {
+    const match = exact.exec(cells[index] ?? '')
+    if (!match) fail('unreadable prompt-size threshold')
+    const label = match[1] === 'Over' ? 'Over' : 'Up to'
+    if (found.has(label)) fail('unreadable prompt-size threshold')
+    found.set(label, { index: index + 1, tokens: Number(match[2]) })
+  }
+  const upTo = found.get('Up to')
+  const over = found.get('Over')
+  if (!upTo || !over || upTo.tokens === 0)
+    fail('unreadable prompt-size threshold')
+  if (upTo.tokens !== over.tokens) fail('prompt-size thresholds disagree')
+  const threshold = upTo.tokens * 1000
+  if (!Number.isSafeInteger(threshold)) fail('unreadable prompt-size threshold')
+  return { threshold, upTo: upTo.index, over: over.index }
+}
 export function parseMetaPricing(
   html: string,
   models: Array<ModelInfo>,
@@ -269,8 +299,10 @@ export function parseMetaPricing(
   )
   for (const section of sections(html, 3)) {
     const rows = tables(section.body)[0]
-    const tokenCols = tokenModeColumns(rows?.[0] ?? [])
-    if (rows && tokenCols) {
+    const head = rows?.[0] ?? []
+    const tokenCols = tokenModeColumns(head)
+    const sizeCols = tokenCols ? undefined : promptSizeColumns(head)
+    if (rows && (tokenCols || sizeCols)) {
       // "Models: a, b in Standard mode; c in Contributor mode." A section
       // that names no mode must have only one priced column.
       const columns = new Map<string, TokenMode | undefined>()
@@ -302,35 +334,55 @@ export function parseMetaPricing(
         Input: 'input_tokens',
         Output: 'output_tokens',
       }
+      const columnRates = (index: number) => {
+        const rates: Record<string, number> = {}
+        for (const row of rows.slice(1)) {
+          const key = meters[row[0] ?? '']
+          if (!key || row.length !== 3) fail('unreadable token price')
+          const cell = row[index] ?? ''
+          if (cell === 'Not available') continue
+          const price = /^\$(\d+(?:\.\d+)?)$/.exec(cell)
+          if (!price) fail('unreadable token price')
+          rates[key] = Number(price[1]) / 1e6
+        }
+        return rates
+      }
       const rates: Record<TokenMode, Record<string, number>> = {
         Standard: {},
         Contributor: {},
       }
-      for (const row of rows.slice(1)) {
-        const key = meters[row[0] ?? '']
-        if (!key || row.length !== 3) fail('unreadable token price')
-        for (const mode of ['Standard', 'Contributor'] as const) {
-          const cell = row[tokenCols[mode]] ?? ''
-          if (cell === 'Not available') continue
-          const price = /^\$(\d+(?:\.\d+)?)$/.exec(cell)
-          if (!price) fail('unreadable token price')
-          rates[mode][key] = Number(price[1]) / 1e6
-        }
-      }
+      if (tokenCols)
+        for (const mode of ['Standard', 'Contributor'] as const)
+          rates[mode] = columnRates(tokenCols[mode])
+      const base = sizeCols ? columnRates(sizeCols.upTo) : {}
+      const over = sizeCols ? columnRates(sizeCols.over) : {}
       const priced = (['Standard', 'Contributor'] as const).filter(
         (mode) => Object.keys(rates[mode]).length,
       )
       for (const [id, stated] of columns) {
-        const mode = stated ?? (priced.length === 1 ? priced[0] : undefined)
+        const mode = sizeCols
+          ? stated
+          : (stated ?? (priced.length === 1 ? priced[0] : undefined))
         if (!mode) fail('token price mode unstated')
         const tier = tiers.get(id)
         if (tier && mode !== tier)
           fail('token price mode disagrees with model tier')
-        const colRates = rates[mode]
+        const colRates = sizeCols ? base : rates[mode]
         if (!('input_tokens' in colRates) || !('output_tokens' in colRates))
           fail('incomplete token pricing')
+        if (
+          sizeCols &&
+          (!('input_tokens' in over) || !('output_tokens' in over))
+        )
+          fail('incomplete token pricing')
         if (cards.has(id)) fail('duplicate model price')
-        const card = compileTokenCard(colRates, [], source)
+        const card = sizeCols
+          ? compileTokenCard(
+              colRates,
+              [{ minPromptTokens: sizeCols.threshold, rates: over }],
+              source,
+            )
+          : compileTokenCard(colRates, [], source)
         if (!card) fail('uncompilable token price')
         cards.set(id, card)
       }

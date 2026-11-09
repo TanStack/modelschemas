@@ -1,4 +1,5 @@
 import { requestUrl } from '#/lib/text.ts'
+import { evaluateCard } from '@modelschemas/rate-card'
 import { afterEach, describe, expect, it } from 'vitest'
 import fixtures from '../fixtures/meta-docs.json'
 import { provider } from './meta.ts'
@@ -489,6 +490,113 @@ describe('Meta native docs', () => {
     expect(cards.get('muse-spark-1.2-contributor')).toEqual(
       cards.get('muse-spark-1.3-contributor'),
     )
+  })
+  // Trimmed from https://dev.meta.ai/docs/pricing-rate-limits on 2026-11-10.
+  // Decorative attributes removed; the prose and cell text are the live page.
+  const museEmberPricing = `<h1 id="pricing">Pricing</h1>
+<h3 id="muse-ember-pricing">Muse Ember</h3>
+<p>Model: <code>muse-ember-1.0</code>, in Standard mode only.</p>
+<p>Muse Ember has two price tiers, and the input tokens in your API request set the tier, cached tokens included. When a request continues a stored conversation with <code>previous_response_id</code>, its input includes that conversation. A request with up to 200K input tokens is billed at the rates in the first column. A request with more is billed at the long-context rates in full, not only for the tokens past 200K. Your invoice and usage dashboard list the two tiers separately.</p>
+<table><thead><tr><th>Usage</th><th>Up to 200K input tokens (per 1M tokens)</th><th>Over 200K input tokens (per 1M tokens)</th></tr></thead><tbody>
+<tr><td>Cached input</td><td>$0.004</td><td>$0.012</td></tr>
+<tr><td>Input</td><td>$0.10</td><td>$0.30</td></tr>
+<tr><td>Output</td><td>$0.50</td><td>$1.50</td></tr>
+</tbody></table>`
+  const emberModel = (tier: string) => ({
+    rawId: 'muse-ember-1.0',
+    providerMetadata: { family: 'Muse Ember', tier },
+  })
+  const emberSource = {
+    url: META_PRICING,
+    hash: 'live-2026-11-10',
+    extractedAt: '2026-11-10',
+  }
+  it('reads Muse Ember as one card with a 200K prompt-size tier', () => {
+    const cards = parseMetaPricing(
+      museEmberPricing,
+      [emberModel('Standard')],
+      emberSource,
+    )
+    const card = cards.get('muse-ember-1.0')
+    expect(card).toMatchObject({
+      tables: {
+        rate: {
+          base: {
+            cache_read_tokens: 0.004 / 1e6,
+            input_tokens: 0.1 / 1e6,
+            output_tokens: 0.5 / 1e6,
+          },
+          '200000': {
+            cache_read_tokens: 0.012 / 1e6,
+            input_tokens: 0.3 / 1e6,
+            output_tokens: 1.5 / 1e6,
+          },
+        },
+      },
+    })
+    if (!card) throw new Error('missing muse-ember-1.0 card')
+    // 200K exactly stays on the first column. One token over bills the
+    // whole request at the long-context column. Cached input counts
+    // toward the threshold and is priced on its own lever.
+    expect(
+      evaluateCard(card, {
+        usage: { input_tokens: 200_000, output_tokens: 100 },
+      }).amount,
+    ).toBeCloseTo(200_000 * (0.1 / 1e6) + 100 * (0.5 / 1e6), 10)
+    expect(
+      evaluateCard(card, {
+        usage: { input_tokens: 200_001, output_tokens: 100 },
+      }).amount,
+    ).toBeCloseTo(200_001 * (0.3 / 1e6) + 100 * (1.5 / 1e6), 10)
+    expect(
+      evaluateCard(card, {
+        usage: {
+          input_tokens: 199_000,
+          cache_read_tokens: 1_000,
+          output_tokens: 0,
+        },
+      }).amount,
+    ).toBeCloseTo(199_000 * (0.1 / 1e6) + 1_000 * (0.004 / 1e6), 10)
+    expect(
+      evaluateCard(card, {
+        usage: {
+          input_tokens: 199_000,
+          cache_read_tokens: 2_000,
+          output_tokens: 0,
+        },
+      }).amount,
+    ).toBeCloseTo(199_000 * (0.3 / 1e6) + 2_000 * (0.012 / 1e6), 10)
+    expect(() =>
+      parseMetaPricing(
+        museEmberPricing,
+        [emberModel('Contributor')],
+        emberSource,
+      ),
+    ).toThrow('token price mode disagrees with model tier')
+  })
+  it('fails when the two prompt-size thresholds disagree', () => {
+    expect(() =>
+      parseMetaPricing(
+        museEmberPricing.replace(
+          'Over 200K input tokens',
+          'Over 128K input tokens',
+        ),
+        [emberModel('Standard')],
+        emberSource,
+      ),
+    ).toThrow('prompt-size thresholds disagree')
+  })
+  it('fails when a prompt-size header does not parse', () => {
+    expect(() =>
+      parseMetaPricing(
+        museEmberPricing.replace(
+          'Over 200K input tokens (per 1M tokens)',
+          'Over 200 thousand input tokens (per 1M tokens)',
+        ),
+        [emberModel('Standard')],
+        emberSource,
+      ),
+    ).toThrow('unreadable prompt-size threshold')
   })
   it('fails when a pay-as-you-go chat ID gets no token price', () => {
     const models = parseMetaModels(docs[META_MODELS] ?? '', pages)
