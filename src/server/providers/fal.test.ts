@@ -352,4 +352,32 @@ describe('fal AsyncAPI discovery', () => {
     expect(fetched.specs).toHaveLength(2)
     expect(fetched.asyncApiRawIds).toEqual([])
   })
+
+  it('throws when the unlisted lookup fails with anything but 404', async () => {
+    fetchMock.mockImplementation((input) => {
+      const url = requestUrl(input)
+      if (url.startsWith('https://api.fal.ai/v1/models')) {
+        if (new URL(url).searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+          return Promise.resolve(new Response('forbidden', { status: 403 }))
+        }
+        return Promise.resolve(
+          jsonBody({
+            models: [
+              {
+                endpoint_id: 'fal-ai/flux/dev',
+                openapi: FLUX_OPENAPI,
+                metadata: { category: 'text-to-image' },
+              },
+            ],
+            has_more: false,
+            next_cursor: null,
+          }),
+        )
+      }
+      return Promise.resolve(new Response('nope', { status: 404 }))
+    })
+    await expect(
+      falProvider.fetchSpec({ FAL_KEY: 'test-key' }),
+    ).rejects.toThrow('403')
+  })
 })

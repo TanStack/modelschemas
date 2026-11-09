@@ -175,7 +175,14 @@ const FETCH_TIMEOUT_MS = 60_000
 const ENDPOINT_FILTER_MAX = 50
 
 /** Non-retryable upstream failure — thrown through the retry loop as-is. */
-class FalFetchError extends Error {}
+class FalFetchError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message)
+  }
+}
 
 /**
  * The paginated crawl is ~30 requests per pass and runs from both cron
@@ -199,7 +206,10 @@ export async function fetchPageWithRetry(
       if (response.ok) return (await response.json()) as FalApiResponse
       lastFailure = `${String(response.status)} ${response.statusText}`
       if (!RETRYABLE_STATUSES.has(response.status)) {
-        throw new FalFetchError(`fal models fetch failed: ${lastFailure}`)
+        throw new FalFetchError(
+          `fal models fetch failed: ${lastFailure}`,
+          response.status,
+        )
       }
       const retryAfter = Number(response.headers.get('retry-after'))
       if (Number.isFinite(retryAfter) && retryAfter > 0) {
@@ -245,10 +255,9 @@ async function fetchFalModels(
 
 /**
  * Append {@link FAL_UNLISTED_ENDPOINT_IDS} that the active crawl did not
- * return. A 404 (the id is gone) is skipped. Any other non-retryable
- * failure is skipped the same way: the crawl already succeeded, and one
- * missing side lookup must not sink the poll. A thrown retry exhaustion
- * still fails the sync.
+ * return. Only a 404 (the id is gone) is skipped, so the row is marked
+ * removed. Any other failure throws: skipping it would also drop the row,
+ * and the poller would emit a false `model.removed`.
  */
 async function appendUnlistedFalModels(
   apiKey: string,
@@ -263,7 +272,7 @@ async function appendUnlistedFalModels(
     try {
       page = await fetchFalModels(apiKey, expandOpenApi, [id])
     } catch (error) {
-      if (error instanceof FalFetchError) continue
+      if (error instanceof FalFetchError && error.status === 404) continue
       throw error
     }
     const match = page.find((model) => model.endpoint_id === id)
