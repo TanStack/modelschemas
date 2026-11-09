@@ -514,13 +514,22 @@ describe('byteplus curated models (no ARK_API_KEY)', () => {
       if (doc) return Promise.resolve(new Response(doc()))
       return original(url, init)
     }) as typeof fetch
-    const { models, skipped } = await byteplusProvider
+    const { models, skipped, docsFailures } = await byteplusProvider
       .listModels({})
       .finally(() => {
         globalThis.fetch = original
       })
-    // Keyless is a supported mode, not a skip: the embedded catalog stands in.
+    // Keyless is a supported mode, not a skip: the embedded catalog stands
+    // in, and the poll records the fallback so it is not a healthy poll.
     expect(skipped).toBeUndefined()
+    // First, so a docs-page failure in the same poll does not hide it.
+    // `failed` may be higher when a docs source also fails.
+    expect(docsFailures?.failed).toBeGreaterThanOrEqual(1)
+    expect(docsFailures?.first[0]).toEqual({
+      source: 'https://ark.ap-southeast.bytepluses.com/api/v3/models',
+      error: 'ARK_API_KEY is unset; serving the embedded catalog',
+      elapsedMs: 0,
+    })
     // 18 chat + 7 video + 5 image + 2 speech.
     expect(models).toHaveLength(32)
     expect(new Set(models.map((m) => m.rawId)).size).toBe(32)
@@ -737,6 +746,22 @@ describe('byteplus live models (ARK_API_KEY set)', () => {
       }),
     ).toEqual(['tools', 'tool_choice', 'reasoning', 'response_format'])
   })
+
+  it.each([
+    ['an empty data array', { data: [] }],
+    ['no data field', {}],
+    ['a null body', null],
+    ['data that is not an array', { data: { id: 'seed-2-0-lite-260428' } }],
+  ])(
+    'throws when Ark returns %s, so the poll keeps the stored rows',
+    async (_label, body) => {
+      await expect(
+        withStubbedFetch(body, () =>
+          byteplusProvider.listModels({ ARK_API_KEY: 'ark-test' }),
+        ),
+      ).rejects.toThrow(/returned no models; refusing the embedded catalog/)
+    },
+  )
 
   it('fills the gaps the listing omits from the curated catalog', async () => {
     const { result } = await withStubbedFetch(ARK_PAGE, () =>

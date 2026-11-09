@@ -30,8 +30,10 @@
  *    no Ark listing.
  *
  * So the live rows win where they exist and the curated entries fill the
- * gaps; with no key at all the provider still serves the curated catalog
- * rather than reporting itself skipped.
+ * gaps. With no key the provider still serves the curated catalog, and
+ * reports that fallback on `docsFailures`, so a dropped secret is not a
+ * healthy poll. A live response with no `data` array, or an empty one,
+ * throws: the poll keeps the stored rows instead of writing the catalog.
  */
 import type { Activity } from '#/db/schema.ts'
 import { errorMessage } from '#/server/errors.ts'
@@ -310,6 +312,21 @@ const BYTEPLUS_MODELS: Array<CuratedModel> = [
   },
 ]
 
+/**
+ * The live listing, or null when it cannot be trusted. A 200 with no
+ * `data` array, or an empty one, is how a bad key and a shape change both
+ * presented: `listModels` then served every curated row and the poll
+ * succeeded. Null makes the caller throw.
+ */
+function arkModelList(body: unknown): Array<ArkModel> | null {
+  if (typeof body !== 'object' || body === null || !('data' in body)) {
+    return null
+  }
+  const data = body.data
+  if (!Array.isArray(data) || data.length === 0) return null
+  return data as Array<ArkModel>
+}
+
 function curatedModels(): Array<ModelInfo> {
   return BYTEPLUS_MODELS.map((m) => ({
     rawId: m.rawId,
@@ -485,6 +502,18 @@ async function listModels(
   kv?: KVNamespace,
 ): Promise<ListModelsResult> {
   const docs = docsRun()
+  const key = env.ARK_API_KEY
+  // No key: the embedded catalog is still a real answer (a fresh install
+  // has nothing else), but the poll must say so. A dropped secret otherwise
+  // rewrites the live rows and counts as success.
+  if (!key) {
+    docs.failed++
+    docs.first.unshift({
+      source: ARK_MODELS_URL,
+      error: 'ARK_API_KEY is unset; serving the embedded catalog',
+      elapsedMs: 0,
+    })
+  }
   const [pricing, reasoning, tools] = await Promise.all([
     byteplusModelPricing(docs, kv),
     byteplusModelReasoning(kv),
@@ -519,9 +548,6 @@ async function listModels(
         reasoning(model.rawId, listsReasoning(model.capabilities)),
       )
     })
-  const key = env.ARK_API_KEY
-  // No key: the embedded catalog is still a real answer, so serve it rather
-  // than reporting the provider skipped.
   if (!key) {
     return {
       models: withPricing(curatedModels()),
@@ -529,10 +555,16 @@ async function listModels(
     }
   }
 
-  const body = (await fetchJson(ARK_MODELS_URL, {
+  const body = await fetchJson(ARK_MODELS_URL, {
     headers: { Authorization: `Bearer ${key}` },
-  })) as { data?: Array<ArkModel> }
-  const live = (body.data ?? []).map(toModelInfo)
+  })
+  const data = arkModelList(body)
+  if (!data) {
+    throw new Error(
+      `Ark GET ${ARK_MODELS_URL} returned no models; refusing the embedded catalog`,
+    )
+  }
+  const live = data.map(toModelInfo)
 
   // Curated entries the listing omits: Seed Speech (different host) and ids
   // Ark serves but does not enumerate.
@@ -548,8 +580,8 @@ export const byteplusProvider: ProviderConfig = {
   id: 'byteplus',
   displayName: 'BytePlus',
   // Optional, not required: it upgrades the model catalog from embedded to
-  // live. fetchSpec never needs it, and listModels degrades to the curated
-  // catalog without it.
+  // live. fetchSpec never needs it. Without it listModels still serves the
+  // curated catalog and reports that on docsFailures.
   authEnvVar: 'ARK_API_KEY',
   // Overridden per operation: the generated Ark document stamps
   // 'generated', and the Seed Speech document stamps its own verified
