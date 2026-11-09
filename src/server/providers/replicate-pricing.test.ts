@@ -303,6 +303,24 @@ describe('replicate prediction prices', () => {
     ).toThrow(/not one of/)
   })
 
+  it('still refuses a keyed tier billed by a metric it has never seen', () => {
+    const variant = (value: string, metric: string) => ({
+      criteria: [{ title: 'model variant', type: 'equals', value }],
+      prices: [{ metric, price: '$0.05', title: 'x', type: 'per-unit' }],
+    })
+    expect(
+      compileReplicateBilling(
+        {
+          current_tiers: [
+            variant('low', 'image_output_count'),
+            variant('new', 'brand_new_metric'),
+          ],
+        },
+        SOURCE,
+      ),
+    ).toBeNull()
+  })
+
   it('reads billingConfig from the model page and ignores a page with none', () => {
     const html = `<section id="pricing"><script type="application/json">{"billingConfig":{"current_tiers":[{"criteria":[],"prices":[{"metric":"image_output_count","price":"$0.04","title":"per output image","type":"per-unit"}]}]}}</script>`
     expect(replicateBillingFromHtml(html)?.current_tiers).toHaveLength(1)

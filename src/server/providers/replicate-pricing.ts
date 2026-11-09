@@ -189,13 +189,15 @@ function stateable(tier: ReplicateTier): boolean {
   if (criteria.some((c) => c.type === 'equals' && c.value === null)) {
     return false
   }
-  return (tier.prices ?? []).every((price) => {
-    const param =
-      price.metric && Object.hasOwn(METRIC_PARAM, price.metric)
-        ? METRIC_PARAM[price.metric]
-        : undefined
-    return param !== undefined && !param.endsWith('_tokens')
-  })
+  // Only these two known shapes are left out. A metric this file has never
+  // seen keeps its tier, so the grid fails and the poll logs pricing_lost.
+  return !(tier.prices ?? []).some(
+    (price) =>
+      price.metric === 'unspecified_billing_metric' ||
+      (price.metric !== undefined &&
+        Object.hasOwn(METRIC_PARAM, price.metric) &&
+        METRIC_PARAM[price.metric]!.endsWith('_tokens')),
+  )
 }
 
 /**
