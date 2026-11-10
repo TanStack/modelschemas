@@ -5,7 +5,7 @@
  * time a key is missing. The frozen models.dev snapshot is retired once.
  * After a real list settles the provider, a skip leaves those rows alone.
  */
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm'
 
 import type { Db } from '#/db/index.ts'
 import {
@@ -92,28 +92,57 @@ export async function dropModelsDevSchemaVersions(
 }
 
 /**
+ * Rows per models.dev card clear. One `UPDATE … SET pricing, fact_sources =
+ * CASE` over a provider's whole catalog (OpenRouter) spends D1's 10-second
+ * resource window by itself (issue #625). Twenty stays under the
+ * 100-parameter cap and rewrites one page of rows per statement.
+ */
+export const MODELS_DEV_CARD_CHUNK = 20
+
+/**
  * Null every stored card whose source is models.dev, and drop the pricing
  * fact that pointed at it. Docs cards use a different source URL and stay.
+ * Matching ids are read in keyset pages and cleared by primary key, so a
+ * provider with many cards never rewrites them in one statement.
  */
 export async function nullModelsDevRateCards(
   db: Db,
   providerId: string,
 ): Promise<void> {
-  await db
-    .update(models)
-    .set({
-      pricing: null,
-      factSources: sql`CASE
-        WHEN json_remove(${models.factSources}, '$.pricing') = '{}' THEN NULL
-        ELSE json_remove(${models.factSources}, '$.pricing')
-      END`,
-    })
-    .where(
-      and(
-        eq(models.providerId, providerId),
-        sql`json_extract(${models.pricing}, '$.source.url') = ${MODELS_DEV_API_URL}`,
-      ),
-    )
+  let after: string | undefined
+  for (;;) {
+    const rows = await db
+      .select({ id: models.id })
+      .from(models)
+      .where(
+        and(
+          eq(models.providerId, providerId),
+          sql`json_extract(${models.pricing}, '$.source.url') = ${MODELS_DEV_API_URL}`,
+          after === undefined ? undefined : gt(models.id, after),
+        ),
+      )
+      .orderBy(asc(models.id))
+      .limit(MODELS_DEV_CARD_CHUNK)
+    const last = rows.at(-1)
+    if (!last) return
+    await db
+      .update(models)
+      .set({
+        pricing: null,
+        factSources: sql`CASE
+          WHEN json_remove(${models.factSources}, '$.pricing') = '{}' THEN NULL
+          ELSE json_remove(${models.factSources}, '$.pricing')
+        END`,
+      })
+      .where(
+        inArray(
+          models.id,
+          rows.map((row) => row.id),
+        ),
+      )
+    if (rows.length < MODELS_DEV_CARD_CHUNK) return
+    after = last.id
+  }
 }
 
 async function catalogSettled(db: Db, providerId: string): Promise<boolean> {

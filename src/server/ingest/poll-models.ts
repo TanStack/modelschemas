@@ -105,6 +105,13 @@ export interface PollOutcome {
   error?: string
 }
 
+/**
+ * Unchanged rows per `last_seen_at … IN (…)` statement. Ninety ids fits
+ * D1's 100-parameter cap but rewrites a large IN-list of fat rows in one
+ * statement, enough to spend the 10-second resource window (issue #625).
+ */
+export const LAST_SEEN_CHUNK = 20
+
 /** Deterministic model row id: `${providerId}-${slugified rawId}`. */
 export function modelDbId(providerId: string, rawId: string): string {
   const slug = rawId
@@ -1075,13 +1082,12 @@ export async function pollProviderModels(
     outcome.updated++
   }
 
-  // Bump lastSeenAt for the unchanged majority in chunks that stay under
-  // D1's 100-bound-parameter-per-statement limit.
-  for (let i = 0; i < cleanIds.length; i += 90) {
+  // Bump lastSeenAt for the unchanged majority, in small IN-lists.
+  for (let i = 0; i < cleanIds.length; i += LAST_SEEN_CHUNK) {
     await db
       .update(models)
       .set({ lastSeenAt: now })
-      .where(inArray(models.id, cleanIds.slice(i, i + 90)))
+      .where(inArray(models.id, cleanIds.slice(i, i + LAST_SEEN_CHUNK)))
   }
 
   // Backdates carry per-row values, so bulk-update via CASE. Five bound
@@ -1158,16 +1164,39 @@ export async function pollProviderModels(
   return outcome
 }
 
+/**
+ * How long to wait after D1 says its 10-second resource window is spent,
+ * before the next provider (or the same-as reconcile) touches the primary.
+ */
+export const D1_WINDOW_WAIT_MS = 10_000
+
+/**
+ * D1 overload, and the internal-error sibling that resets the same primary.
+ * Either one means the next statement in the next few seconds fails too.
+ */
+export function d1WindowExhausted(message: string): boolean {
+  const text = message.toLowerCase()
+  if (!text.includes('d1')) return false
+  return text.includes('overloaded') || text.includes('internal error')
+}
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms)
+  })
+
 /** Poll every registered provider with per-provider failure isolation. */
 export async function pollAllProviders(
   deps: SyncDeps,
   registry: ReadonlyArray<ProviderConfig> = providerRegistry,
+  wait: (ms: number) => Promise<void> = sleep,
 ): Promise<Array<PollOutcome>> {
   const outcomes: Array<PollOutcome> = []
   for (const provider of registry) {
-    await runIngestScope(async () => {
+    const exhausted = await runIngestScope(async () => {
       try {
         outcomes.push(await pollProviderModels(deps, provider))
+        return false
       } catch (error) {
         const message = errorMessage(error)
         // Own log line per failure: the aggregate outcomes blob can exceed
@@ -1190,10 +1219,14 @@ export async function pollAllProviders(
           failures: 1,
           error: message,
         })
+        // Not a retry of this provider. The next one would fail inside the
+        // same window, so let the window close first.
+        return d1WindowExhausted(message)
       } finally {
         await captureIngestEvents(deps.secrets.POSTHOG_PROJECT_KEY)
       }
     })
+    if (exhausted) await wait(D1_WINDOW_WAIT_MS)
   }
   // Links span providers, so resolve them once per run, outside any one
   // provider's outcome: a failure here must not read as every poll failing.
