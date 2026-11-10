@@ -1405,6 +1405,103 @@ describe('assembleProviderOpenApi', () => {
     if (!onlyAsync.ok) expect(onlyAsync.message).toContain('AsyncAPI')
   })
 
+  it('serves Reactor per activity with one component pair per endpoint (#618)', async () => {
+    await db
+      .insert(providers)
+      .values({
+        id: 'reactor',
+        displayName: 'Reactor',
+        specSourceUrl: 'https://example.com/r',
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(models)
+      .values(
+        ['reactor/helios', 'reactor/lingbot', 'reactor/lingbot-world-2'].map(
+          (rawId) => ({
+            id: rawId.replace('/', '-'),
+            providerId: 'reactor',
+            rawId,
+            activity: 'video' as const,
+            firstSeenAt: NOW,
+            lastSeenAt: NOW,
+          }),
+        ),
+      )
+      .onConflictDoNothing()
+    const paths = [
+      '/reactor/helios',
+      '/reactor/helios/events/set_prompt',
+      '/reactor/lingbot-world-2/events/pause',
+    ]
+    await db
+      .insert(endpoints)
+      .values(
+        paths.map((path) => ({
+          id: `reactor${path}`,
+          providerId: 'reactor',
+          activity: 'video' as const,
+          method: 'POST',
+          path,
+        })),
+      )
+      .onConflictDoNothing()
+    await db
+      .insert(schemaVersions)
+      .values(
+        paths.flatMap((path, i) =>
+          (['input', 'output'] as const).map((kind, k) => ({
+            id: `reactor${path}:${kind}`,
+            endpointId: `reactor${path}`,
+            kind,
+            contentHash: String(i * 2 + k).repeat(64),
+            schema: JSON.stringify({
+              type: 'object',
+              properties: { [kind]: { type: 'string' } },
+            }),
+            createdAt: NOW,
+          })),
+        ),
+      )
+      .onConflictDoNothing()
+
+    for (const query of [{ activity: 'video' }, {}]) {
+      const result = await assembleProviderOpenApi(db, 'reactor', query)
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const doc = result.document as {
+        paths: Record<string, unknown>
+        components: { schemas: Record<string, Record<string, unknown>> }
+      }
+      expect(Object.keys(doc.paths).sort()).toEqual(paths)
+      const schemas = doc.components.schemas
+      expect(schemas['input_reactor_helios_events_set_prompt']).toMatchObject({
+        'x-modelschemas-model': 'reactor/helios',
+      })
+      expect(
+        schemas['output_reactor_lingbot-world-2_events_pause'],
+      ).toMatchObject({ 'x-modelschemas-model': 'reactor/lingbot-world-2' })
+      expect(
+        Object.keys(schemas).filter((key) => /^(input|output)_/.test(key)),
+      ).toHaveLength(paths.length * 2)
+      expect(unresolvedRefs(result.document)).toEqual([])
+    }
+
+    await db
+      .insert(endpoints)
+      .values({
+        id: 'reactor/orphan',
+        providerId: 'reactor',
+        activity: 'video',
+        method: 'POST',
+        path: '/orphan',
+      })
+      .onConflictDoNothing()
+    expect(
+      await assembleProviderOpenApi(db, 'reactor', { activity: 'video' }),
+    ).toMatchObject({ ok: false, code: 'spec_requires_selector' })
+  })
+
   it('404s unknown provider and unknown model', async () => {
     expect(await assembleProviderOpenApi(db, 'nope')).toMatchObject({
       ok: false,

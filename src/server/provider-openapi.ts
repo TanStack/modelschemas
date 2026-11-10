@@ -536,6 +536,77 @@ function queueEndpointParameter(
 }
 
 /**
+ * The model that owns each endpoint: the longest raw id that is the path
+ * or a path prefix (`/reactor/helios/events/set_prompt` → `reactor/helios`).
+ * Undefined when an endpoint has no owner or two endpoints share a path,
+ * since neither can be one document.
+ */
+async function endpointOwners(
+  db: Db,
+  providerId: string,
+  selected: Array<LoadedEndpoint>,
+): Promise<Map<string, string> | undefined> {
+  const rows = await db
+    .select({ rawId: models.rawId })
+    .from(models)
+    .where(eq(models.providerId, providerId))
+  const rawIds = rows
+    .map((row) => row.rawId)
+    .sort((a, b) => b.length - a.length)
+  const owners = new Map<string, string>()
+  const paths = new Set<string>()
+  for (const endpoint of selected) {
+    if (paths.has(endpoint.path)) return undefined
+    paths.add(endpoint.path)
+    const owner = rawIds.find(
+      (rawId) =>
+        endpointMatchesModel(endpoint.id, endpoint.path, rawId) ||
+        endpoint.path.startsWith(`/${rawId}/`),
+    )
+    if (owner === undefined) return undefined
+    owners.set(endpoint.id, owner)
+  }
+  return owners
+}
+
+/** Each endpoint's bodies as `$ref`s to `input_`/`output_` components. */
+function buildModelComponents(
+  selected: Array<LoadedEndpoint>,
+  owners: Map<string, string>,
+): { endpoints: Array<LoadedEndpoint>; schemas: Record<string, unknown> } {
+  const used = new Set<string>()
+  const schemas: Record<string, unknown> = {}
+  const component = (
+    kind: 'input' | 'output',
+    endpoint: LoadedEndpoint,
+    schema: unknown,
+    owner: string,
+  ) => {
+    if (schema === undefined) return undefined
+    const name = schemaComponentKey(kind, endpoint.id, used)
+    schemas[name] = withModelAnnotation(schema, owner)
+    return { $ref: `#/components/schemas/${name}` }
+  }
+  const typed = selected.map((endpoint) => {
+    const owner = owners.get(endpoint.id)
+    if (owner === undefined) {
+      throw new Error(`openapi: endpoint ${endpoint.id} has no owning model`)
+    }
+    return {
+      ...endpoint,
+      input: component(
+        'input',
+        endpoint,
+        applyModelEnum(endpoint.input, [owner]),
+        owner,
+      ),
+      output: component('output', endpoint, endpoint.output, owner),
+    }
+  })
+  return { endpoints: typed, schemas }
+}
+
+/**
  * One queue client: `POST /{endpoint_id}` and
  * `GET /{endpoint_id}/requests/{request_id}`. A model is in `endpoint_id`
  * only when it has an input schema. The request `anyOf` is those schemas,
@@ -1120,8 +1191,13 @@ export async function assembleProviderOpenApi(
     selected = selectQueueEndpoints(loaded, queueRawIds)
   }
 
+  // A model-grained provider without a queue (Reactor) keeps one path per
+  // endpoint; each body becomes an `input_`/`output_` component tagged with
+  // the model that owns the path.
+  let owners: Map<string, string> | undefined
   if (grain === 'model' && pinnedModel === undefined && !queue) {
-    return refuseModelGrained(providerId, loaded.length)
+    owners = await endpointOwners(db, providerId, selected)
+    if (!owners) return refuseModelGrained(providerId, loaded.length)
   }
 
   const profile = applyConnectProfile(config, selected)
@@ -1174,24 +1250,30 @@ export async function assembleProviderOpenApi(
     Object.assign(paths, built.paths)
     queueSchemas = built.schemas
   } else {
-    const modelIds = pinnedModel
-      ? [pinnedModel]
-      : (
-          await listModelsCatalog(db, {
-            provider: providerId,
-            activity,
-          })
-        ).models.map((m) => m.rawId)
+    const built = owners ? buildModelComponents(selected, owners) : undefined
+    if (built) queueSchemas = built.schemas
+    const modelIds =
+      owners !== undefined
+        ? []
+        : pinnedModel
+          ? [pinnedModel]
+          : (
+              await listModelsCatalog(db, {
+                provider: providerId,
+                activity,
+              })
+            ).models.map((m) => m.rawId)
     // An upstream `#stream` path key (Mistral) is the same URL. Twins are
     // built aside and merged into the base once their schemas are hoisted.
-    for (const endpoint of selected) {
+    for (const endpoint of built?.endpoints ?? selected) {
       const path = endpoint.path.split('#')[0] ?? endpoint.path
       const target = path === endpoint.path ? paths : twinPaths
+      const owner = owners?.get(endpoint.id)
       for (const op of operationsFor(
         providerId,
         { ...endpoint, path },
         connect,
-        modelIds,
+        owner !== undefined ? [owner] : modelIds,
         pinnedModel,
       )) {
         const item = target[op.path] ?? {}
@@ -1238,9 +1320,11 @@ export async function assembleProviderOpenApi(
     info: {
       title: `${config?.displayName ?? providerId} (modelschemas)`,
       version: revision,
-      description: queue
-        ? `Generation-only OpenAPI assembled by modelschemas from stored endpoint schemas. Call this provider directly with your own key — this is not a proxy. One queue client: endpoint_id is the model raw id${lean ? "; bodies are untyped here, pass ?activity= to inline each model's own schema" : ", and each component schema is that model's own body (x-modelschemas-model)"}.`
-        : `Generation-only OpenAPI assembled by modelschemas from live endpoint schemas. Call this provider directly with your own key — this is not a proxy.`,
+      description: owners
+        ? `Generation-only OpenAPI assembled by modelschemas from stored endpoint schemas. Call this provider directly with your own key — this is not a proxy. One path per endpoint; each body is a component schema (input_/output_) tagged with its model (x-modelschemas-model).`
+        : queue
+          ? `Generation-only OpenAPI assembled by modelschemas from stored endpoint schemas. Call this provider directly with your own key — this is not a proxy. One queue client: endpoint_id is the model raw id${lean ? "; bodies are untyped here, pass ?activity= to inline each model's own schema" : ", and each component schema is that model's own body (x-modelschemas-model)"}.`
+          : `Generation-only OpenAPI assembled by modelschemas from live endpoint schemas. Call this provider directly with your own key — this is not a proxy.`,
     },
     servers: connect.servers,
     ...(Object.keys(connect.securitySchemes).length > 0
