@@ -15,7 +15,7 @@ import {
   OPENAI_PRICING_URL,
   openaiModelFacts,
 } from './openai-model-docs.ts'
-import { docsRun } from './model-facts.ts'
+import { docsCacheKey, docsRun } from './model-facts.ts'
 import { OPENAI_REALTIME_EFFORT_URL } from './openai-realtime-efforts.ts'
 
 const originalFetch = globalThis.fetch
@@ -232,6 +232,25 @@ it('keeps the listing when the docs host forbids the index or a page (#371)', as
   expect(facts('gpt-5-pro').reasoning?.mode).toBe('effort')
   expect(facts('gpt-5-pro').absent).toBeUndefined()
   expect(pageRun.failed).toBe(1)
+})
+
+it('ignores a search pricing cache written before cacheReadNotOffered', async () => {
+  serve(allGuides, { 'gpt-5-pro': proPage })
+  const store = new Map<string, string>([
+    [
+      docsCacheKey(OPENAI_PRICING_URL),
+      JSON.stringify({ rates: {}, hash: 'old', extractedAt: 'old' }),
+    ],
+  ])
+  const kv = {
+    get: (key: string) => Promise.resolve(store.get(key) ?? null),
+    put: (key: string, value: string) => {
+      store.set(key, value)
+      return Promise.resolve()
+    },
+  } as unknown as KVNamespace
+  const facts = await openaiModelFacts(['gpt-5-search-api'], kv, docsRun())
+  expect(facts('gpt-5-search-api').pricing).not.toBeNull()
 })
 
 it('marks only unpriced rows when the pricing page alone fails (#371)', async () => {

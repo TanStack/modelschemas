@@ -641,7 +641,8 @@ export async function openaiModelFacts(
     ),
   ]
   const searchDoc = await tryDocs(run, OPENAI_PRICING_URL, (cached) =>
-    cached(kv, OPENAI_PRICING_URL, async () => {
+    // v2: the cached value gained `cacheReadNotOffered`; a v1 value lacks it.
+    cached(kv, `${OPENAI_PRICING_URL}#search-v2`, async () => {
       const markdown = await fetchText(OPENAI_PRICING_URL, undefined, fetcher)
       const parsed = parseOpenAiSearchPricing(markdown)
       assertParsed(parsed, 'openai pricing page search rows')
