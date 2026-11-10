@@ -104,7 +104,7 @@ describe('parseFishAudioPricing', () => {
     expect(free && price(free, {}, { utf8_bytes: 1e6 })).toBe(0)
   })
 
-  it('throws on an unread price or an unparsed promotion', () => {
+  it('throws on an unread price, an unparsed promotion, or a row with no id', () => {
     expect(() =>
       parseFishAudioPricing(PRICING_PAGE.replace('/ audio hour', '/ minute')),
     ).toThrow(/transcribe-1-pro has an unread price/)
@@ -113,6 +113,9 @@ describe('parseFishAudioPricing', () => {
         PRICING_PAGE.replace('Through November 30, 2026', 'Until Nov 30'),
       ),
     ).toThrow(/promotion/)
+    expect(() =>
+      parseFishAudioPricing(PRICING_PAGE.replace('`s2.1-pro`', 's2.1-pro')),
+    ).toThrow(/row "s2.1-pro" names no model id/)
   })
 })
 

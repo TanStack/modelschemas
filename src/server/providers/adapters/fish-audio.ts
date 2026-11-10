@@ -86,8 +86,13 @@ export function parseFishAudioPricing(page: string): Map<string, FishAudioRow> {
   const rows = new Map<string, FishAudioRow>()
   for (const { heading, route } of SECTIONS) {
     for (const cells of markdownTableRows(section(page, heading))) {
+      if (cells[0] === 'Model Name') continue
       const rawId = /`([^`]+)`/.exec(cells[0] ?? '')?.[1]
-      if (!rawId) continue
+      if (!rawId) {
+        throw new Error(
+          `fish-audio pricing: ${heading} row "${cells[0] ?? ''}" names no model id`,
+        )
+      }
       const price = PRICE.exec((cells[1] ?? '').trim())
       const unit = price?.[2]?.trim()
       if (!price?.[1] || !unit || !(unit in UNITS)) {
@@ -134,7 +139,9 @@ export function fishAudioCard(
 ): RateCard | null {
   const promo = row.promo && now < row.promo.endsAt ? row.promo : null
   const usd = promo ? promo.usd : row.usd
-  const { param, per } = UNITS[row.unit] ?? { param: null, per: 1 }
+  const unit = UNITS[row.unit]
+  if (!unit) throw new Error(`fish-audio pricing: unknown unit ${row.unit}`)
+  const { param, per } = unit
   const sourced = promo
     ? { ...source, expiresAt: new Date(promo.endsAt).toISOString() }
     : source
