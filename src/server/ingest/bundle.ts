@@ -46,7 +46,7 @@ export interface ExtractedEndpointSchemas {
   /** Bundled output schema; absent for binary-media endpoints (TTS audio, …). */
   output?: Record<string, JsonValue>
   /**
-   * Bundled SSE event schema, set only when the success body also has a
+   * Bundled SSE (or NDJSON) event schema, set only when the success body also has a
    * JSON schema. The JSON schema stays `output`. Absent when the only
    * stored body is already the stream schema (speech).
    */
@@ -278,6 +278,11 @@ function isJsonType(value: string): boolean {
 function isEventStream(value: string): boolean {
   const base = mediaTypeBase(value)
   return base === 'text/event-stream' || base.endsWith('/event-stream')
+}
+
+/** SSE, or Ollama's newline-delimited JSON (`application/x-ndjson`). */
+function isStreamType(value: string): boolean {
+  return isEventStream(value) || mediaTypeBase(value) === 'application/x-ndjson'
 }
 
 function isMultipart(value: string): boolean {
@@ -526,7 +531,7 @@ function bindSuccessContent(
     )
     if (json) {
       const stream = Object.entries(content).find(([type]) =>
-        isEventStream(type),
+        isStreamType(type),
       )
       return {
         content,
@@ -537,7 +542,7 @@ function bindSuccessContent(
   }
   if (!first) return undefined
   const stream = Object.entries(first).find(
-    ([type, media]) => isEventStream(type) && media.schema !== undefined,
+    ([type, media]) => isStreamType(type) && media.schema !== undefined,
   )
   return { content: first, ...(stream ? { stream: stream[1] } : {}) }
 }
