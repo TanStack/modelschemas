@@ -59,6 +59,12 @@ import {
 } from './docs-failing.ts'
 import type { DocsFailing } from './docs-failing.ts'
 import {
+  D1_WINDOW_WAIT_MS,
+  d1WindowExhausted,
+  retryOnceAfterD1Window,
+  sleep,
+} from './d1-window.ts'
+import {
   captureIngestEvents,
   runIngestScope,
   ingestFailedEvent,
@@ -1165,26 +1171,7 @@ export async function pollProviderModels(
   return outcome
 }
 
-/**
- * How long to wait after D1 says its 10-second resource window is spent,
- * before the next provider (or the same-as reconcile) touches the primary.
- */
-export const D1_WINDOW_WAIT_MS = 10_000
-
-/**
- * D1 overload, and the internal-error sibling that resets the same primary.
- * Either one means the next statement in the next few seconds fails too.
- */
-export function d1WindowExhausted(message: string): boolean {
-  const text = message.toLowerCase()
-  if (!text.includes('d1')) return false
-  return text.includes('overloaded') || text.includes('internal error')
-}
-
-const sleep = (ms: number) =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, ms)
-  })
+export { D1_WINDOW_WAIT_MS, d1WindowExhausted }
 
 /** Poll every registered provider with per-provider failure isolation. */
 export async function pollAllProviders(
@@ -1194,9 +1181,18 @@ export async function pollAllProviders(
 ): Promise<Array<PollOutcome>> {
   const outcomes: Array<PollOutcome> = []
   for (const provider of registry) {
+    // A spent window is retried once (issue #635). The failure recorded
+    // below is the second attempt, or a failure that was not a spent window.
     const exhausted = await runIngestScope(async () => {
       try {
-        outcomes.push(await pollProviderModels(deps, provider))
+        outcomes.push(
+          await retryOnceAfterD1Window(
+            'models-poll',
+            provider.id,
+            () => pollProviderModels(deps, provider),
+            wait,
+          ),
+        )
         return false
       } catch (error) {
         const message = errorMessage(error)
@@ -1220,13 +1216,12 @@ export async function pollAllProviders(
           failures: 1,
           error: message,
         })
-        // Not a retry of this provider. The next one would fail inside the
-        // same window, so let the window close first.
         return d1WindowExhausted(message)
       } finally {
         await captureIngestEvents(deps.secrets.POSTHOG_PROJECT_KEY)
       }
     })
+    // The next provider would fail inside the same window.
     if (exhausted) await wait(D1_WINDOW_WAIT_MS)
   }
   // Links span providers, so resolve them once per run, outside any one

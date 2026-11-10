@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { bodyText, requestUrl } from '#/lib/text.ts'
+import { describe, expect, it, vi } from 'vitest'
 import { compileTokenCard } from '@modelschemas/rate-card'
 import type { RateCard } from '@modelschemas/rate-card'
 import { FIXTURE_CARDS } from '../../../packages/rate-card/src/fixtures/index.ts'
@@ -32,7 +33,12 @@ import {
   readIngestRecords,
   recordDocsFailing,
 } from './docs-failing.ts'
-import { runIngestScope, takeIngestEvents } from './ingest-signals.ts'
+import {
+  POSTHOG_CAPTURE_URL,
+  runIngestScope,
+  takeIngestEvents,
+} from './ingest-signals.ts'
+import type { PostHogBatch } from './ingest-signals.ts'
 import {
   D1_WINDOW_WAIT_MS,
   LAST_SEEN_CHUNK,
@@ -3052,8 +3058,9 @@ describe('D1 overload window (issue #625)', () => {
       'D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window',
       'spent',
     )
-    expect(calls).toBe(1)
-    expect(waits).toEqual([D1_WINDOW_WAIT_MS])
+    // One retry, then a wait before the next provider. Not a third attempt.
+    expect(calls).toBe(2)
+    expect(waits).toEqual([D1_WINDOW_WAIT_MS, D1_WINDOW_WAIT_MS])
     expect(D1_WINDOW_WAIT_MS).toBe(10_000)
     expect(outcomes[0]).toMatchObject({
       providerId: 'overload-a-spent',
@@ -3073,7 +3080,8 @@ describe('D1 overload window (issue #625)', () => {
       'D1_ERROR: Internal error in D1 DB storage caused object to be reset.',
       'reset',
     )
-    expect(internal.waits).toEqual([D1_WINDOW_WAIT_MS])
+    expect(internal.calls).toBe(2)
+    expect(internal.waits).toEqual([D1_WINDOW_WAIT_MS, D1_WINDOW_WAIT_MS])
     expect(internal.outcomes[1]?.added).toBe(1)
 
     const other = await twoProviders('listing 503', 'other')
@@ -3081,5 +3089,100 @@ describe('D1 overload window (issue #625)', () => {
     expect(other.waits).toEqual([])
     expect(other.outcomes[0]?.error).toContain('listing 503')
     expect(other.outcomes[1]).toMatchObject({ added: 1, failures: 0 })
+  })
+
+  const overload =
+    'D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window'
+
+  async function postedEvents(
+    run: () => Promise<void>,
+  ): Promise<PostHogBatch['batch']> {
+    const batches: Array<PostHogBatch> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async (input, init) => {
+        if (requestUrl(input) === POSTHOG_CAPTURE_URL) {
+          batches.push(JSON.parse(bodyText(init?.body)) as PostHogBatch)
+        }
+        return new Response('', { status: 200 })
+      }),
+    )
+    try {
+      await run()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    return batches.flatMap((batch) => batch.batch)
+  }
+
+  it('retries one D1 overload and records nothing when the second poll succeeds', async () => {
+    const id = 'overload-retry-ok'
+    const waits: Array<number> = []
+    let calls = 0
+    const provider = stubProvider(id, [{ rawId: 'm' }])
+    provider.listModels = () => {
+      calls++
+      if (calls === 1) return Promise.reject(new Error(overload))
+      return Promise.resolve({ models: [{ rawId: 'm' }] })
+    }
+    const deps = await freshDeps(id)
+    deps.secrets.POSTHOG_PROJECT_KEY = 'phc_test'
+    const events = await postedEvents(async () => {
+      const outcomes = await pollAllProviders(deps, [provider], (ms) => {
+        waits.push(ms)
+        return Promise.resolve()
+      })
+      expect(outcomes).toMatchObject([
+        { providerId: id, added: 1, failures: 0 },
+      ])
+      expect(outcomes[0]?.error).toBeUndefined()
+    })
+    expect(calls).toBe(2)
+    expect(waits).toEqual([D1_WINDOW_WAIT_MS])
+    expect(events.filter((event) => event.event === 'ingest_failed')).toEqual(
+      [],
+    )
+    const row = await deps.db.query.providers.findFirst({
+      where: eq(providers.id, id),
+    })
+    expect(row?.status).toBe('active')
+    const model = await deps.db.query.models.findFirst({
+      where: eq(models.id, modelDbId(id, 'm')),
+    })
+    expect(model?.rawId).toBe('m')
+  })
+
+  it('records ingest_failed when the retry overloads too', async () => {
+    const id = 'overload-retry-fail'
+    let calls = 0
+    const provider = stubProvider(id, [{ rawId: 'm' }])
+    provider.listModels = () => {
+      calls++
+      return Promise.reject(new Error(overload))
+    }
+    const deps = await freshDeps(id)
+    deps.secrets.POSTHOG_PROJECT_KEY = 'phc_test'
+    const events = await postedEvents(async () => {
+      const outcomes = await pollAllProviders(deps, [provider], () =>
+        Promise.resolve(),
+      )
+      expect(outcomes).toMatchObject([
+        { providerId: id, failures: 1, modelsSeen: 0 },
+      ])
+      expect(outcomes[0]?.error).toContain('D1 DB is overloaded')
+    })
+    expect(calls).toBe(2)
+    expect(
+      events.filter((event) => event.event === 'ingest_failed'),
+    ).toMatchObject([
+      {
+        event: 'ingest_failed',
+        properties: { job: 'models-poll', providerId: id, error: overload },
+      },
+    ])
+    const row = await deps.db.query.providers.findFirst({
+      where: eq(providers.id, id),
+    })
+    expect(row?.status).toBe('active')
   })
 })
