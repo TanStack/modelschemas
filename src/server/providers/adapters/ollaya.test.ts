@@ -1,11 +1,42 @@
 import { Validator } from '@cfworker/json-schema'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { classifyAndBundle } from '../../ingest/sync.ts'
-import { parseOllayaConfig, provider, registryTags } from './ollaya.ts'
+import { sha256Text } from '../types.ts'
+import {
+  OLLAYA_CONTRACT_URL,
+  parseOllayaConfig,
+  provider,
+  registryTags,
+} from './ollaya.ts'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+/** Serve docs/api.md with this text; any other URL fails the test. */
+function serveContract(text: string) {
+  vi.stubGlobal('fetch', (url: string) =>
+    Promise.resolve(
+      url === OLLAYA_CONTRACT_URL
+        ? new Response(text)
+        : new Response('unexpected', { status: 500 }),
+    ),
+  )
+}
 
 describe('ollaya', () => {
+  it('hashes the contract text, so a docs/api.md edit is a new source', async () => {
+    serveContract('# contract v1')
+    const first = await provider.fetchSpec({})
+    expect(first.sources[0]?.hash).toBe(await sha256Text('# contract v1'))
+    serveContract('# contract v2')
+    const second = await provider.fetchSpec({})
+    expect(second.sources[0]?.hash).not.toBe(first.sources[0]?.hash)
+  })
+
   it('bundles POST /v1/systemone as a decision endpoint', async () => {
+    serveContract('# contract')
     const bundled = classifyAndBundle(provider, await provider.fetchSpec({}))
     expect(bundled.endpoints).toHaveLength(1)
     const [endpoint] = bundled.endpoints
@@ -96,6 +127,22 @@ describe('ollaya', () => {
       contextWindow: null,
       openWeights: null,
       weightsUrl: null,
+    })
+  })
+
+  it('throws on a config value it cannot read', () => {
+    expect(() => parseOllayaConfig('x:1', { context_length: '512' })).toThrow(
+      /context_length/,
+    )
+    expect(() => parseOllayaConfig('x:1', { release_date: 'soon' })).toThrow(
+      /release_date/,
+    )
+    expect(() => parseOllayaConfig('x:1', { source: 42 })).toThrow(/source/)
+    // Absent fields are unstated, not errors.
+    expect(parseOllayaConfig('x:1', {})).toMatchObject({
+      contextWindow: null,
+      releasedAt: null,
+      openWeights: null,
     })
   })
 })

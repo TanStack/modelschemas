@@ -11,10 +11,9 @@
  * config blob with the description, context length and release date. No
  * key; nothing is priced (the models run locally).
  */
-import { contentHash } from '#/server/kv.ts'
 import { githubRequestInit } from '../github.ts'
 import { cachedDocs, mapConcurrent } from '../model-facts.ts'
-import { fetchJson } from '../types.ts'
+import { fetchJson, fetchText, sha256Text } from '../types.ts'
 import type {
   ListModelsResult,
   ModelInfo,
@@ -29,6 +28,8 @@ export const OLLAYA_DOCS_URL =
   'https://github.com/ollaya-dev/ollaya/blob/main/docs/api.md'
 export const OLLAYA_TREE_URL =
   'https://api.github.com/repos/ollaya-dev/ollaya/git/trees/main:registry/v2/library?recursive=1'
+export const OLLAYA_CONTRACT_URL =
+  'https://raw.githubusercontent.com/ollaya-dev/ollaya/main/docs/api.md'
 const OLLAYA_REGISTRY = 'https://ollaya.dev/v2/library'
 
 export const OLLAYA_CONNECT: ProviderConnect = {
@@ -380,11 +381,15 @@ export function ollayaSpec(): OpenApiDocument {
   }
 }
 
+/**
+ * The source hash is the contract's own text, so an edit to docs/api.md
+ * shows as a new source revision even though the schemas are hand-written.
+ */
 async function fetchSpec(_env: ProviderSecrets): Promise<SpecFetchResult> {
-  const spec = ollayaSpec()
+  const contract = await fetchText(OLLAYA_CONTRACT_URL)
   return {
-    specs: [spec],
-    sources: [{ url: OLLAYA_DOCS_URL, hash: await contentHash(spec) }],
+    specs: [ollayaSpec()],
+    sources: [{ url: OLLAYA_DOCS_URL, hash: await sha256Text(contract) }],
     outputStrategy: 'post-200',
   }
 }
@@ -426,19 +431,35 @@ export function registryTags(tree: unknown): Array<string> {
 export function parseOllayaConfig(rawId: string, config: unknown): ModelInfo {
   if (!isRecord(config))
     throw new Error(`ollaya: ${rawId} config is not an object`)
-  const context = config.context_length
-  const released =
-    typeof config.release_date === 'string'
-      ? Date.parse(config.release_date)
-      : Number.NaN
-  const source = typeof config.source === 'string' ? config.source : ''
+  const bad = (field: string) =>
+    new Error(`ollaya: ${rawId} config.${field} is unreadable`)
+  // Absent is unstated; a router states 0 (no context of its own).
+  const context = config.context_length ?? 0
+  if (
+    typeof context !== 'number' ||
+    !Number.isInteger(context) ||
+    context < 0
+  ) {
+    throw bad('context_length')
+  }
+  let releasedAt: number | null = null
+  if (config.release_date != null) {
+    const released =
+      typeof config.release_date === 'string'
+        ? Date.parse(config.release_date)
+        : Number.NaN
+    if (!Number.isFinite(released)) throw bad('release_date')
+    releasedAt = Math.floor(released / 1000)
+  }
+  const source = config.source ?? ''
+  if (typeof source !== 'string') throw bad('source')
   const hf = /^huggingface\.co\/([^/@]+\/[^/@]+)/.exec(source)
   return {
     rawId,
     displayName: null,
     activity: 'decision',
-    contextWindow: typeof context === 'number' && context > 0 ? context : null,
-    releasedAt: Number.isFinite(released) ? Math.floor(released / 1000) : null,
+    contextWindow: context > 0 ? context : null,
+    releasedAt,
     openWeights: hf ? true : null,
     weightsUrl: hf ? `https://huggingface.co/${hf[1]}` : null,
     providerMetadata: config,
