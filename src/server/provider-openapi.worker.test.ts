@@ -1579,6 +1579,82 @@ describe('openModelNames', () => {
     expect(schema?.properties?.model).toBeDefined()
     expect(schema?.properties?.model?.enum).toBeUndefined()
   })
+
+  it('serves TypeSafe POST /v1/systemone with model left open', async () => {
+    await db
+      .insert(providers)
+      .values({
+        id: 'typesafe',
+        displayName: 'TypeSafe',
+        specSourceUrl: 'https://api.typesafe.ai/openapi.json',
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(endpoints)
+      .values({
+        id: 'typesafe/v1/systemone',
+        providerId: 'typesafe',
+        activity: 'decision',
+        method: 'POST',
+        path: '/v1/systemone',
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(schemaVersions)
+      .values([
+        {
+          id: 'typesafe/v1/systemone:input',
+          endpointId: 'typesafe/v1/systemone',
+          kind: 'input',
+          contentHash: 'd'.repeat(64),
+          schema: JSON.stringify(INPUT),
+          createdAt: NOW,
+        },
+        {
+          id: 'typesafe/v1/systemone:output',
+          endpointId: 'typesafe/v1/systemone',
+          kind: 'output',
+          contentHash: 'e'.repeat(64),
+          schema: JSON.stringify(OUTPUT),
+          createdAt: NOW,
+        },
+      ])
+      .onConflictDoNothing()
+    await db
+      .insert(models)
+      .values({
+        id: 'typesafe-jev-1-14-0',
+        providerId: 'typesafe',
+        rawId: 'jev-1.14.0',
+        activity: 'decision',
+        firstSeenAt: NOW,
+        lastSeenAt: NOW,
+      })
+      .onConflictDoNothing()
+    const result = await assembleProviderOpenApi(db, 'typesafe')
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const paths = result.document.paths as Record<
+      string,
+      {
+        post?: {
+          requestBody?: {
+            content: {
+              'application/json': {
+                schema: { properties?: { model?: { enum?: unknown } } }
+              }
+            }
+          }
+        }
+      }
+    >
+    const post = paths['/v1/systemone']?.post
+    expect(post).toBeDefined()
+    expect(
+      post?.requestBody?.content['application/json'].schema?.properties?.model
+        ?.enum,
+    ).toBeUndefined()
+  })
 })
 
 describe('modelHeader', () => {

@@ -264,5 +264,16 @@
     ],
     "activities": ["world"],
     "notes": "Mintlify OpenAPI 3.1. api.worldlabs.ai/openapi.json 404s. Catalog and spec are public. Auth is the WLT-Api-Key header. classifyGets so operations, world get, media-asset get, and credits are kept. Marble 1.1 Plus stays unpriced while its totals are ranges."
+  },
+  "typesafe": {
+    "displayName": "TypeSafe",
+    "secret": "TYPESAFE_API_KEY",
+    "strategy": "upstream-spec",
+    "specUrl": "https://api.typesafe.ai/openapi.json",
+    "modelsUrl": "https://docs.typesafe.ai/models.md",
+    "serverUrl": "https://api.typesafe.ai",
+    "include": ["/v1/systemone"],
+    "activities": ["decision"],
+    "notes": "Public OpenAPI 3.1. POST /v1/systemone is the decision call; GET /v1/models is the account list and is dropped. Multipart is stripped so the stored body stays the JSON SystemOneRequest. Catalog and prices are the public models page (output tokens free). model stays an open string."
   }
 }
