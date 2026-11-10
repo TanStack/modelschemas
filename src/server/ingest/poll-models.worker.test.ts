@@ -34,11 +34,17 @@ import {
 } from './docs-failing.ts'
 import { runIngestScope, takeIngestEvents } from './ingest-signals.ts'
 import {
+  D1_WINDOW_WAIT_MS,
+  LAST_SEEN_CHUNK,
+  d1WindowExhausted,
   modelDbId,
   pollAllProviders,
   pollProviderModels,
 } from './poll-models.ts'
-import { MODELS_DEV_API_URL } from './retire-models-dev.ts'
+import {
+  MODELS_DEV_API_URL,
+  MODELS_DEV_CARD_CHUNK,
+} from './retire-models-dev.ts'
 import type { SyncDeps } from './sync.ts'
 
 import {
@@ -335,7 +341,7 @@ describe('pollProviderModels', () => {
   it('bulk-bumps lastSeenAt across chunk boundaries for unchanged models', async () => {
     const id = 'poll-bulk'
     const deps = await freshDeps(id)
-    // 200 models spans three 90-id UPDATE chunks.
+    // 200 models spans ten 20-id UPDATE chunks.
     const herd: Array<ModelInfo> = Array.from({ length: 200 }, (_, i) => ({
       rawId: `model-${String(i)}`,
       displayName: `Model ${String(i)}`,
@@ -1323,6 +1329,52 @@ describe('pollProviderModels', () => {
     expect(kept?.pricing).toMatchObject({
       source: { url: 'https://developers.openai.com/api/docs/pricing' },
     })
+  })
+
+  it('nulls models.dev cards past one write chunk', async () => {
+    const id = 'poll-models-dev-chunks'
+    const deps = await freshDeps(id)
+    const list = Array.from({ length: MODELS_DEV_CARD_CHUNK + 1 }, (_, i) => ({
+      rawId: `m-${String(i)}`,
+    }))
+    await pollProviderModels(deps, stubProvider(id, list))
+    const devCard = {
+      inputs: {
+        num_images: { param: 'num_images', kind: 'number', default: 1 },
+      },
+      tables: {},
+      price: { '*': [{ var: 'num_images' }, 0.08] },
+      examples: [],
+      source: {
+        url: MODELS_DEV_API_URL,
+        hash: 'b'.repeat(64),
+        extractedAt: '2026-10-04T09:33:23.902Z',
+      },
+    }
+    for (const info of list) {
+      await deps.db
+        .update(models)
+        .set({
+          pricing: devCard,
+          factSources: {
+            contextWindow: { derivation: 'listing' },
+            pricing: { derivation: 'listing' },
+          },
+        })
+        .where(eq(models.id, modelDbId(id, info.rawId)))
+    }
+    await pollProviderModels(deps, stubProvider(id, list))
+    const rows = await deps.db
+      .select()
+      .from(models)
+      .where(eq(models.providerId, id))
+    expect(rows).toHaveLength(list.length)
+    for (const row of rows) {
+      expect(row.pricing).toBeNull()
+      expect(row.factSources).toEqual({
+        contextWindow: { derivation: 'listing' },
+      })
+    }
   })
 
   it('drops an OpenCode models.dev card: Zen prices come from its console page (#314)', async () => {
@@ -2941,5 +2993,93 @@ describe('model.updated facts', () => {
       where: eq(cacheMeta.key, `update-storm:${id}`),
     })
     expect(cleared).toBeUndefined()
+  })
+})
+
+describe('D1 overload window (issue #625)', () => {
+  it('keeps lastSeenAt chunks under the parameter cap', () => {
+    expect(LAST_SEEN_CHUNK).toBeLessThan(100)
+    expect(d1WindowExhausted('listing 503')).toBe(false)
+    expect(
+      d1WindowExhausted(
+        'Failed query: update models set last_seen_at = ? where id in (?) ← caused by: D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window',
+      ),
+    ).toBe(true)
+    expect(
+      d1WindowExhausted(
+        'D1_ERROR: Internal error in D1 DB storage caused object to be reset.',
+      ),
+    ).toBe(true)
+  })
+
+  async function twoProviders(
+    thrown: string,
+    suffix: string,
+  ): Promise<{
+    waits: Array<number>
+    calls: number
+    outcomes: Awaited<ReturnType<typeof pollAllProviders>>
+  }> {
+    const waits: Array<number> = []
+    let calls = 0
+    const failingId = `overload-a-${suffix}`
+    const nextId = `overload-b-${suffix}`
+    const failing = stubProvider(failingId, [{ rawId: 'a' }])
+    failing.listModels = () => {
+      calls++
+      return Promise.reject(new Error(thrown))
+    }
+    const next = stubProvider(nextId, [{ rawId: 'b' }])
+    const deps = await freshDeps(failingId)
+    await deps.db.insert(providers).values({
+      id: nextId,
+      displayName: 'Stub',
+      specSourceUrl: 'https://example.com/spec.json',
+    })
+    const outcomes = await pollAllProviders(deps, [failing, next], (ms) => {
+      waits.push(ms)
+      return Promise.resolve()
+    })
+    const row = await deps.db.query.models.findFirst({
+      where: eq(models.id, modelDbId(nextId, 'b')),
+    })
+    expect(row?.rawId).toBe('b')
+    return { waits, calls, outcomes }
+  }
+
+  it('reports the overload and still polls the next provider', async () => {
+    const { waits, calls, outcomes } = await twoProviders(
+      'D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window',
+      'spent',
+    )
+    expect(calls).toBe(1)
+    expect(waits).toEqual([D1_WINDOW_WAIT_MS])
+    expect(D1_WINDOW_WAIT_MS).toBe(10_000)
+    expect(outcomes[0]).toMatchObject({
+      providerId: 'overload-a-spent',
+      failures: 1,
+      modelsSeen: 0,
+      error: expect.stringContaining('D1 DB is overloaded') as string,
+    })
+    expect(outcomes[1]).toMatchObject({
+      providerId: 'overload-b-spent',
+      failures: 0,
+      added: 1,
+    })
+  })
+
+  it('waits out an internal error and does not wait out any other failure', async () => {
+    const internal = await twoProviders(
+      'D1_ERROR: Internal error in D1 DB storage caused object to be reset.',
+      'reset',
+    )
+    expect(internal.waits).toEqual([D1_WINDOW_WAIT_MS])
+    expect(internal.outcomes[1]?.added).toBe(1)
+
+    const other = await twoProviders('listing 503', 'other')
+    expect(other.calls).toBe(1)
+    expect(other.waits).toEqual([])
+    expect(other.outcomes[0]?.error).toContain('listing 503')
+    expect(other.outcomes[1]).toMatchObject({ added: 1, failures: 0 })
   })
 })
