@@ -21,6 +21,20 @@ import { BEDROCK_SDK_MODEL_URL } from '../bedrock-sdk-spec.ts'
 import { sha256Text } from '../types.ts'
 import { provider } from './amazon-bedrock.ts'
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function responseContent(
+  operation: Record<string, unknown> | undefined,
+): unknown {
+  const responses = operation?.responses
+  if (!isRecord(responses)) return undefined
+  const ok = responses['200']
+  if (!isRecord(ok)) return undefined
+  return ok.content
+}
+
 const DOCS = 'https://docs.aws.amazon.com/bedrock/latest/userguide/'
 const YES = `![supported](${DOCS}images/icons/icon-yes.png)`
 const NO = `![not-supported](${DOCS}images/icons/icon-no.png)`
@@ -146,6 +160,25 @@ const SDK_MODEL = {
       output: { shape: 'ConverseResponse' },
       documentation: '<p>Sends messages to the model.</p>',
     },
+    ConverseStream: {
+      http: { method: 'POST', requestUri: '/model/{modelId}/converse-stream' },
+      input: { shape: 'ConverseStreamRequest' },
+      output: { shape: 'ConverseStreamResponse' },
+      documentation: '<p>Streams messages from the model.</p>',
+    },
+    InvokeModel: {
+      http: { method: 'POST', requestUri: '/model/{modelId}/invoke' },
+      input: { shape: 'InvokeModelRequest' },
+      output: { shape: 'InvokeModelResponse' },
+    },
+    InvokeModelWithResponseStream: {
+      http: {
+        method: 'POST',
+        requestUri: '/model/{modelId}/invoke-with-response-stream',
+      },
+      input: { shape: 'InvokeModelRequest' },
+      output: { shape: 'InvokeModelWithResponseStreamResponse' },
+    },
   },
   shapes: {
     ConverseRequest: {
@@ -171,6 +204,68 @@ const SDK_MODEL = {
     Document: { type: 'structure', members: {}, document: true },
     StopReason: { type: 'string', enum: ['end_turn', 'max_tokens'] },
     Throttled: { type: 'structure', members: {}, exception: true },
+    ConverseStreamRequest: {
+      type: 'structure',
+      required: ['modelId', 'messages'],
+      members: {
+        modelId: { shape: 'ModelId', location: 'uri' },
+        messages: { shape: 'Messages', documentation: '<p>The messages.</p>' },
+      },
+    },
+    ConverseStreamResponse: {
+      type: 'structure',
+      members: { stream: { shape: 'ConverseStreamOutput' } },
+      payload: 'stream',
+    },
+    ConverseStreamOutput: {
+      type: 'structure',
+      members: {
+        messageStart: { shape: 'MessageStartEvent' },
+        throttled: { shape: 'Throttled' },
+      },
+      eventstream: true,
+    },
+    MessageStartEvent: {
+      type: 'structure',
+      members: { role: { shape: 'StopReason' } },
+    },
+    InvokeModelRequest: {
+      type: 'structure',
+      required: ['modelId', 'body'],
+      members: {
+        modelId: { shape: 'ModelId', location: 'uri' },
+        body: { shape: 'Body', documentation: '<p>The prompt.</p>' },
+        contentType: {
+          shape: 'MimeType',
+          location: 'header',
+          locationName: 'Content-Type',
+        },
+      },
+      payload: 'body',
+    },
+    InvokeModelResponse: {
+      type: 'structure',
+      required: ['body'],
+      members: { body: { shape: 'Body' } },
+      payload: 'body',
+    },
+    InvokeModelWithResponseStreamResponse: {
+      type: 'structure',
+      required: ['body'],
+      members: { body: { shape: 'ResponseStream' } },
+      payload: 'body',
+    },
+    Body: { type: 'blob' },
+    MimeType: { type: 'string' },
+    ResponseStream: {
+      type: 'structure',
+      members: { chunk: { shape: 'PayloadPart' } },
+      eventstream: true,
+    },
+    PayloadPart: {
+      type: 'structure',
+      members: { bytes: { shape: 'Body' } },
+    },
   },
 }
 
@@ -700,8 +795,47 @@ Set reasoning effort to \`none\`, \`low\`, \`medium\`, \`high\`, \`xhigh\`, or \
 
     expect(urls).toEqual([BEDROCK_SDK_MODEL_URL])
     expect(spec.skipped).toBeUndefined()
-    expect(Object.keys(doc?.paths ?? {})).toEqual(['/model/{modelId}/converse'])
+    expect(Object.keys(doc?.paths ?? {})).toEqual([
+      '/model/{modelId}/converse',
+      '/model/{modelId}/converse-stream',
+      '/model/{modelId}/invoke',
+      '/model/{modelId}/invoke-with-response-stream',
+    ])
     expect(provider.classify('/model/{modelId}/converse', {})).toBe('chat')
+    expect(provider.classify('/model/{modelId}/converse-stream', {})).toBe(
+      'chat',
+    )
+    expect(provider.classify('/model/{modelId}/invoke', {})).toBe('chat')
+    expect(
+      provider.classify('/model/{modelId}/invoke-with-response-stream', {}),
+    ).toBe('chat')
+    const stream = doc?.paths?.['/model/{modelId}/converse-stream']?.post
+    expect(responseContent(stream)).toEqual({
+      'application/vnd.amazon.eventstream': {
+        schema: { $ref: '#/components/schemas/ConverseStreamOutput' },
+      },
+    })
+    const invoke = doc?.paths?.['/model/{modelId}/invoke']?.post
+    expect(invoke?.requestBody).toEqual({
+      required: true,
+      content: {
+        'application/json': { schema: { description: 'The prompt.' } },
+      },
+    })
+    expect(invoke?.parameters).toEqual([
+      {
+        name: 'modelId',
+        in: 'path',
+        required: true,
+        schema: { type: 'string' },
+      },
+      {
+        name: 'Content-Type',
+        in: 'header',
+        required: false,
+        schema: { $ref: '#/components/schemas/MimeType' },
+      },
+    ])
     expect(doc?.components?.schemas).toEqual({
       // modelId rides the path; the body schema leaves it out.
       ConverseRequest: {
@@ -736,6 +870,68 @@ Set reasoning effort to \`none\`, \`low\`, \`medium\`, \`high\`, \`xhigh\`, or \
       Text: { type: 'string', maxLength: 10 },
       Document: {},
       StopReason: { type: 'string', enum: ['end_turn', 'max_tokens'] },
+      ConverseStreamRequest: {
+        type: 'object',
+        properties: {
+          messages: {
+            $ref: '#/components/schemas/Messages',
+            description: 'The messages.',
+          },
+        },
+        required: ['messages'],
+      },
+      ConverseStreamResponse: {
+        type: 'object',
+        properties: {
+          stream: { $ref: '#/components/schemas/ConverseStreamOutput' },
+        },
+      },
+      ConverseStreamOutput: {
+        type: 'object',
+        properties: {
+          messageStart: { $ref: '#/components/schemas/MessageStartEvent' },
+          throttled: { $ref: '#/components/schemas/Throttled' },
+        },
+        minProperties: 1,
+        maxProperties: 1,
+      },
+      MessageStartEvent: {
+        type: 'object',
+        properties: { role: { $ref: '#/components/schemas/StopReason' } },
+      },
+      Throttled: { type: 'object', properties: {} },
+      InvokeModelRequest: {
+        type: 'object',
+        properties: {
+          body: {
+            $ref: '#/components/schemas/Body',
+            description: 'The prompt.',
+          },
+        },
+        required: ['body'],
+      },
+      InvokeModelResponse: {
+        type: 'object',
+        properties: { body: { $ref: '#/components/schemas/Body' } },
+        required: ['body'],
+      },
+      InvokeModelWithResponseStreamResponse: {
+        type: 'object',
+        properties: { body: { $ref: '#/components/schemas/ResponseStream' } },
+        required: ['body'],
+      },
+      Body: { type: 'string', contentEncoding: 'base64' },
+      MimeType: { type: 'string' },
+      ResponseStream: {
+        type: 'object',
+        properties: { chunk: { $ref: '#/components/schemas/PayloadPart' } },
+        minProperties: 1,
+        maxProperties: 1,
+      },
+      PayloadPart: {
+        type: 'object',
+        properties: { bytes: { $ref: '#/components/schemas/Body' } },
+      },
     })
   })
 })
