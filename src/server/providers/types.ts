@@ -134,6 +134,11 @@ export interface ProviderSecrets {
    */
   FISH_AUDIO_API_KEY?: string
   /**
+   * TypeSafe Jev. The OpenAPI document and the models page are public.
+   * Sync and poll do not read this. It is the data-plane bearer key.
+   */
+  TYPESAFE_API_KEY?: string
+  /**
    * PostHog project token (phc_…) for ingest failure events. Optional:
    * absent means capture is a no-op. US cloud, project 643425.
    */
