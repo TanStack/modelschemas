@@ -583,7 +583,10 @@ function buildModelComponents(
     return { $ref: `#/components/schemas/${name}` }
   }
   const typed = selected.map((endpoint) => {
-    const owner = owners.get(endpoint.id) ?? ''
+    const owner = owners.get(endpoint.id)
+    if (owner === undefined) {
+      throw new Error(`openapi: endpoint ${endpoint.id} has no owning model`)
+    }
     return {
       ...endpoint,
       input: component(
