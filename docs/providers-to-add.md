@@ -56,6 +56,7 @@ best-known — confirm on signup.
 | [x]  | `HYPERBOLIC_API_KEY`  | Hyperbolic                 | chat                                 | [app.hyperbolic.xyz](https://app.hyperbolic.xyz)                                        |
 | [x]  | `NOVITA_API_KEY`      | Novita AI                  | chat · image                         | [novita.ai → key management](https://novita.ai)                                         |
 | [x]  | `REACTOR_API_KEY`     | Reactor                    | video                                | [reactor.inc/dashboard](https://reactor.inc/dashboard)                                  |
+| [x]  | `WORLDLABS_API_KEY`   | World Labs                 | world                                | [platform.worldlabs.ai](https://platform.worldlabs.ai)                                  |
 
 ### Next — AI SDK first-party we don't have
 

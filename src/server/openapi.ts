@@ -42,6 +42,7 @@ const activityEnum = [
   'audio',
   'embeddings',
   'moderation',
+  'world',
 ]
 
 const changeTypeEnum = [

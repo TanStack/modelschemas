@@ -124,6 +124,11 @@ export interface ProviderSecrets {
    */
   REACTOR_API_KEY?: string
   /**
+   * World Labs Marble. The catalog and OpenAPI document are public. The
+   * key is the data-plane `WLT-Api-Key` header. Sync and poll do not read it.
+   */
+  WORLDLABS_API_KEY?: string
+  /**
    * PostHog project token (phc_…) for ingest failure events. Optional:
    * absent means capture is a no-op. US cloud, project 643425.
    */

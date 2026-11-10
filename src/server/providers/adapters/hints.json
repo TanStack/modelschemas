@@ -243,5 +243,26 @@
     "modelsUrl": "https://api.reactor.inc/pricing",
     "activities": ["video"],
     "notes": "No api.reactor.inc/openapi.json. Per-model OpenAPI 3.1 (POST /events/<command>) is compiled by the runtime and embedded in https://reactor.inc/models/{slug}/api; the JS SDK loads the same document via requestSchema() after a live session is ready. fetchSpec extracts those pages (keyless). Catalog is public GET /pricing. Auth for live sessions is Reactor-API-Key."
+  },
+  "worldlabs": {
+    "displayName": "World Labs",
+    "secret": "WORLDLABS_API_KEY",
+    "strategy": "upstream-spec",
+    "specUrl": "https://docs.worldlabs.ai/api/reference/openapi.yaml",
+    "modelsUrl": "https://docs.worldlabs.ai/api/models.md",
+    "serverUrl": "https://api.worldlabs.ai",
+    "include": [
+      "/marble/v1/worlds:generate",
+      "/marble/v1/worlds/{world_id}",
+      "/marble/v1/worlds/{world_id}:export",
+      "/marble/v1/worlds:list",
+      "/marble/v1/operations/{operation_id}",
+      "/marble/v1/media-assets:prepare_upload",
+      "/marble/v1/media-assets/{media_asset_id}",
+      "/marble/v1/pano:depth_to_rgb",
+      "/marble/v1/credits"
+    ],
+    "activities": ["world"],
+    "notes": "Mintlify OpenAPI 3.1. api.worldlabs.ai/openapi.json 404s. Catalog and spec are public. Auth is the WLT-Api-Key header. classifyGets so operations, world get, media-asset get, and credits are kept. Marble 1.1 Plus stays unpriced while its totals are ranges."
   }
 }
