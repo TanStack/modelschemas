@@ -158,8 +158,9 @@ spec syncs daily. Responses are JSON unless noted (`text/typescript`,
    paths). FAL is one queue document: the model id is the endpoint_id path
    parameter (x-modelschemas-encode: raw — do not percent-encode slashes).
    Bare, the bodies are untyped; ?activity= inlines each model's own body
-   schema (up to 1024 models); ?model= is that one model's paths. A filter
-   that matches none: 400
+   schema (up to 1024 models); ?model= is that one model's paths. Reactor
+   keeps one path per endpoint, each body an input_/output_ component
+   (x-modelschemas-model). A filter that matches none: 400
    spec_requires_selector. HTTP only (no MCP tool).
 7. POST /v1/validate {"provider","endpointId","payload"} — check a payload.
 8. POST /v1/estimate {"provider","model","request"?,"usage"?} — {amount,
