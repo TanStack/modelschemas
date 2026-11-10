@@ -129,6 +129,11 @@ export interface ProviderSecrets {
    */
   WORLDLABS_API_KEY?: string
   /**
+   * Fish Audio. The OpenAPI document and pricing-page catalog are public;
+   * the key is `Authorization: Bearer`. Sync and poll do not read it.
+   */
+  FISH_AUDIO_API_KEY?: string
+  /**
    * PostHog project token (phc_…) for ingest failure events. Optional:
    * absent means capture is a no-op. US cloud, project 643425.
    */
@@ -696,6 +701,12 @@ export interface ProviderConnect {
    * schema (FAL queue). The POST keeps the input schema only.
    */
   siblingGet?: boolean
+  /**
+   * Request header that selects the model (Fish Audio `model`), for
+   * providers whose bodies carry no `model` field. Each operation gets
+   * this header, its enum the listed ids bound to that endpoint.
+   */
+  modelHeader?: string
 }
 
 export interface ProviderConfig {

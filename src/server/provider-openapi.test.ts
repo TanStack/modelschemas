@@ -166,6 +166,62 @@ describe('generation media types', () => {
     })
   })
 
+  it('adds the model header with the ids bound to that route (Fish Audio)', () => {
+    const [op] = operationsFor(
+      'fish-audio',
+      {
+        id: 'v1/asr',
+        path: '/v1/asr',
+        activity: 'audio',
+        description: null,
+        method: 'POST',
+        input: schema,
+        requestContentType: 'multipart/form-data',
+        responseContentTypes: null,
+        specRevision: null,
+      },
+      {
+        servers: [{ url: 'https://api.fish.audio' }],
+        securitySchemes: {},
+        security: [],
+        modelHeader: 'model',
+      },
+      ['transcribe-1-pro', 'transcribe-1'],
+      undefined,
+    )
+    expect(op?.operation.parameters).toEqual([
+      {
+        name: 'model',
+        in: 'header',
+        required: false,
+        schema: { type: 'string', enum: ['transcribe-1-pro', 'transcribe-1'] },
+      },
+    ])
+    const [create] = operationsFor(
+      'fish-audio',
+      {
+        id: 'model',
+        path: '/model',
+        activity: 'audio',
+        description: null,
+        method: 'POST',
+        input: schema,
+        requestContentType: 'multipart/form-data',
+        responseContentTypes: null,
+        specRevision: null,
+      },
+      {
+        servers: [{ url: 'https://api.fish.audio' }],
+        securitySchemes: {},
+        security: [],
+        modelHeader: 'model',
+      },
+      [],
+      undefined,
+    )
+    expect(create?.operation.parameters).toBeUndefined()
+  })
+
   it('describes audio responses as binary and keeps a stream schema beside them', () => {
     expect(
       responseMedia(schema, [

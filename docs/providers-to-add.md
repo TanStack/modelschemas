@@ -70,7 +70,7 @@ OpenAI-compatible catalog, not a new API surface).
 | [ ]  | `GLADIA_API_KEY`      | Gladia       | audio         | [app.gladia.io/apikeys](https://app.gladia.io/apikeys)                                                    |
 | [ ]  | `LMNT_API_KEY`        | LMNT         | audio         | [docs.lmnt.com](https://docs.lmnt.com)                                                                    |
 | [ ]  | `HUME_API_KEY`        | Hume         | audio         | [app.hume.ai/keys](https://app.hume.ai/keys)                                                              |
-| [ ]  | `FISH_AUDIO_API_KEY`  | Fish Audio   | audio         | [fish.audio/app/api-keys](https://fish.audio/app/api-keys/)                                               |
+| [x]  | `FISH_AUDIO_API_KEY`  | Fish Audio   | audio         | [fish.audio/app/api-keys](https://fish.audio/app/api-keys/)                                               |
 | [ ]  | `REVAI_API_KEY`       | Rev.ai       | audio         | [rev.ai/access-token](https://www.rev.ai/access-token)                                                    |
 | [ ]  | `PRODIA_API_KEY`      | Prodia       | image · video | [app.prodia.com/api](https://app.prodia.com/api)                                                          |
 | [ ]  | `QUIVERAI_API_KEY`    | QuiverAI     | image         | [app.quiver.ai/settings/api-keys](https://app.quiver.ai/settings/api-keys)                                |
