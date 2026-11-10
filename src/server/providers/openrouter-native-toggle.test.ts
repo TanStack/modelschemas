@@ -209,10 +209,8 @@ it('states reasoning_content replay only on reasoning rows', async () => {
   )
   const listed = await openrouterProvider.listModels({})
   expect(listed.models[0]?.reasoning).toBeNull()
-  expect(listed.models[0]?.requestMap?.replayReasoningContent).toBeNull()
-  expect(
-    listed.models[0]?.factSources?.requestMapFields?.replayReasoningContent,
-  ).toBeUndefined()
+  expect(listed.models[0]?.requestMap).toBeNull()
+  expect(listed.models[0]?.factSources?.requestMapFields).toBeUndefined()
 })
 
 it('sources high only from an actual accepted native enum and leaves another native model wire unknown', async () => {
