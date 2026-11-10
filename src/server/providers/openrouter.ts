@@ -449,7 +449,8 @@ async function listModels(
       }
       const factSources = {
         ...(reasoningSource ? { reasoning: reasoningSource } : {}),
-        ...(Object.keys(requestMapFields).length > 0
+        // A source only for a map that is stored.
+        ...(requestMap && Object.keys(requestMapFields).length > 0
           ? { requestMapFields }
           : {}),
       }
