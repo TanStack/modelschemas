@@ -351,6 +351,7 @@ export const activities = [
   'audio',
   'embeddings',
   'moderation',
+  'world',
 ] as const
 export type Activity = (typeof activities)[number]
 

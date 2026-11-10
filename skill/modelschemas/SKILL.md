@@ -111,7 +111,7 @@ spec syncs daily. Responses are JSON unless noted (`text/typescript`,
 ## Why use this
 
 - Discover which models exist *right now*, across providers, by activity
-  (chat, image, video, audio, embeddings, moderation). Grain=provider
+  (chat, image, video, audio, embeddings, moderation, world). Grain=provider
   catalogs (Grok, OpenAI, …) set `activity` on each row and
   `schemaEndpointId` pointing at the shared generation route
   (`v1/images/generations`, `images/generations`, …). `pricing` is a

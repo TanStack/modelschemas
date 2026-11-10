@@ -767,6 +767,7 @@ export type Model = {
     | 'audio'
     | 'embeddings'
     | 'moderation'
+    | 'world'
     | null
   displayName: string | null
   schemaEndpointId: string | null
@@ -889,6 +890,7 @@ export type ExportModel = {
     | 'audio'
     | 'embeddings'
     | 'moderation'
+    | 'world'
     | null
   displayName: string | null
   schemaEndpointId: string | null
@@ -1239,6 +1241,7 @@ export type ListModelsData = {
       | 'audio'
       | 'embeddings'
       | 'moderation'
+      | 'world'
     provider?: string
     /**
      * A capability flag the model is stated to support: matches rows whose capabilities map has this key set to true (capability=tools). Exact flag name, not a substring.
@@ -1366,7 +1369,14 @@ export type GetActivitySchemasData = {
     /**
      * Activity group.
      */
-    activity: 'chat' | 'image' | 'video' | 'audio' | 'embeddings' | 'moderation'
+    activity:
+      | 'chat'
+      | 'image'
+      | 'video'
+      | 'audio'
+      | 'embeddings'
+      | 'moderation'
+      | 'world'
   }
   query?: never
   url: '/v1/schemas/{provider}/{activity}'
@@ -1404,7 +1414,14 @@ export type GetSchemaData = {
     /**
      * Activity group.
      */
-    activity: 'chat' | 'image' | 'video' | 'audio' | 'embeddings' | 'moderation'
+    activity:
+      | 'chat'
+      | 'image'
+      | 'video'
+      | 'audio'
+      | 'embeddings'
+      | 'moderation'
+      | 'world'
     /**
      * Path-derived endpoint id (URL-encode slashes), or a listed model rawId/slug which aliases onto that activity's generation route and pins the request `model` field.
      */
@@ -1474,6 +1491,7 @@ export type GetProviderOpenApiData = {
       | 'audio'
       | 'embeddings'
       | 'moderation'
+      | 'world'
   }
   url: '/v1/openapi/{provider}'
 }

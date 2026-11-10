@@ -41,6 +41,9 @@ const CARD_LEVEL_LEVERS = new Set([
   // Seedance reference-video seconds. Not a generation-schema property;
   // refusing it nulled the whole stored card.
   'input_video_duration',
+  // World Labs prices one total per published input type. The generate
+  // schema's world_prompt is an object, so the label is not a property.
+  'world_prompt_kind',
 ])
 
 export type { CompactPricing }

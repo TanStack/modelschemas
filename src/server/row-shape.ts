@@ -16,10 +16,10 @@ import { changes, providers } from '#/db/schema.ts'
 import { openApiDocument } from '#/server/openapi.ts'
 
 export const MODEL_ROW_SHAPE = {
-  version: 6,
-  hash: '86ecb32cc63c129da79519d506678a0c6b912f4c113e7bf202a98ac0b8909879',
+  version: 7,
+  hash: '389ba1a078911926b0373c8b371678f8e2fac81b476360bf8794f2aa6f7ee90b',
   notes:
-    'pricing and PricingRange.routes[].card: RateCard now types its price (RateCardPrice), tables (RateCardTable) and inputs (a union by kind) instead of leaving them open. reasoning is the ModelReasoning component; requestMap.thinking.off is an object or null. Cards and rows served are unchanged (issue #494).',
+    'Activity gained world for World Labs Marble world generation (issue #617).',
 } as const
 
 /** Every component schema a /v1 model row response is built from. */
