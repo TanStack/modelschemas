@@ -387,40 +387,27 @@ async function listModels(
     return null
   }
   return {
-    models: body.data.map((m) => ({
-      rawId: m.id,
-      displayName: m.name ?? null,
-      activity: openrouterModelActivity(m.architecture?.output_modalities),
-      releasedAt: m.created ?? null,
-      contextWindow: m.context_length ?? null,
-      maxOutput: m.top_provider?.max_completion_tokens ?? null,
-      pricing: m.pricing,
-      modalities: m.architecture
-        ? {
-            input: m.architecture.input_modalities,
-            output: m.architecture.output_modalities,
-          }
-        : undefined,
-      capabilities: openrouterCapabilities(m),
-      reasoning: openRouterReasoning(
+    models: body.data.map((m) => {
+      const activity = openrouterModelActivity(
+        m.architecture?.output_modalities,
+      )
+      const reasoning = openRouterReasoning(
         m,
         gateway?.efforts,
         gateway?.toggle !== undefined,
-      ),
-      requestMap:
-        openrouterModelActivity(m.architecture?.output_modalities) === 'chat'
+      )
+      const thinking = ownThinking(m)
+      // The guide states replay for reasoning models only. An all-null map
+      // would count as a filled requestMap.
+      const replayReasoningContent = reasoning ? (true as const) : null
+      const requestMap =
+        activity === 'chat' &&
+        (thinking != null || replayReasoningContent === true)
           ? {
-              thinking: ownThinking(m),
+              thinking,
               maxTokensField: null,
               developerRole: null,
-              // The guide states replay for reasoning models only.
-              replayReasoningContent: openRouterReasoning(
-                m,
-                gateway?.efforts,
-                gateway?.toggle !== undefined,
-              )
-                ? (true as const)
-                : null,
+              replayReasoningContent,
               store: null,
               strictTools: null,
               sessionAffinity: null,
@@ -428,64 +415,65 @@ async function listModels(
               toolStream: null,
               reasoningEffort: null,
             }
-          : null,
-      ...(openrouterModelActivity(m.architecture?.output_modalities) ===
-        'chat' ||
-      (gateway &&
-        (m.reasoning?.supported_efforts === null || ownThinking(m) !== null) &&
-        typeof m.reasoning?.mandatory === 'boolean')
-        ? {
-            factSources: {
-              ...(gateway &&
-              (m.reasoning?.supported_efforts === null ||
-                ownThinking(m) !== null) &&
-              typeof m.reasoning?.mandatory === 'boolean'
-                ? {
-                    reasoning: {
-                      derivation: 'docs-derived' as const,
-                      sourceUrl: OPENROUTER_REASONING_URL,
-                      sourceHash: gateway.hash,
-                      path:
-                        m.reasoning.supported_efforts === null
-                          ? 'supported_efforts:null; normative gateway effort bullets; listing mandatory'
-                          : openRouterReasoning(
-                                m,
-                                gateway.efforts,
-                                gateway.toggle !== undefined,
-                              )?.mode === 'toggle'
-                            ? 'native mandatory:false; Messages API normalized reasoning.enabled accepted on every reasoning model; explicit disables prose'
-                            : 'native per-model accepted efforts and mandatory metadata; universal normalized reasoning.effort field',
-                    },
-                  }
-                : {}),
-              ...(openrouterModelActivity(m.architecture?.output_modalities) ===
-              'chat'
-                ? {
-                    requestMapFields: {
-                      ...(ownThinking(m) && gateway
-                        ? {
-                            thinking: {
-                              derivation: 'docs-derived' as const,
-                              sourceUrl: OPENROUTER_REASONING_URL,
-                              sourceHash: gateway.hash,
-                              path: 'native accepted effort values or nonmandatory toggle; normative universal normalized reasoning effort/enabled fields',
-                            },
-                          }
-                        : {}),
-                      ...(openRouterReasoning(
-                        m,
-                        gateway?.efforts,
-                        gateway?.toggle !== undefined,
-                      )
-                        ? { replayReasoningContent: replaySource }
-                        : {}),
-                    },
-                  }
-                : {}),
-            },
-          }
-        : {}),
-    })),
+          : null
+      const reasoningSource =
+        gateway &&
+        (m.reasoning?.supported_efforts === null || thinking != null) &&
+        typeof m.reasoning?.mandatory === 'boolean'
+          ? {
+              derivation: 'docs-derived' as const,
+              sourceUrl: OPENROUTER_REASONING_URL,
+              sourceHash: gateway.hash,
+              path:
+                m.reasoning.supported_efforts === null
+                  ? 'supported_efforts:null; normative gateway effort bullets; listing mandatory'
+                  : reasoning?.mode === 'toggle'
+                    ? 'native mandatory:false; Messages API normalized reasoning.enabled accepted on every reasoning model; explicit disables prose'
+                    : 'native per-model accepted efforts and mandatory metadata; universal normalized reasoning.effort field',
+            }
+          : null
+      const requestMapFields = {
+        ...(thinking != null && gateway
+          ? {
+              thinking: {
+                derivation: 'docs-derived' as const,
+                sourceUrl: OPENROUTER_REASONING_URL,
+                sourceHash: gateway.hash,
+                path: 'native accepted effort values or nonmandatory toggle; normative universal normalized reasoning effort/enabled fields',
+              },
+            }
+          : {}),
+        ...(replayReasoningContent === true
+          ? { replayReasoningContent: replaySource }
+          : {}),
+      }
+      const factSources = {
+        ...(reasoningSource ? { reasoning: reasoningSource } : {}),
+        // A source only for a map that is stored.
+        ...(requestMap && Object.keys(requestMapFields).length > 0
+          ? { requestMapFields }
+          : {}),
+      }
+      return {
+        rawId: m.id,
+        displayName: m.name ?? null,
+        activity,
+        releasedAt: m.created ?? null,
+        contextWindow: m.context_length ?? null,
+        maxOutput: m.top_provider?.max_completion_tokens ?? null,
+        pricing: m.pricing,
+        modalities: m.architecture
+          ? {
+              input: m.architecture.input_modalities,
+              output: m.architecture.output_modalities,
+            }
+          : undefined,
+        capabilities: openrouterCapabilities(m),
+        reasoning,
+        requestMap,
+        ...(Object.keys(factSources).length > 0 ? { factSources } : {}),
+      }
+    }),
   }
 }
 
