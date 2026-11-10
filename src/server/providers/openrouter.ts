@@ -413,7 +413,14 @@ async function listModels(
               thinking: ownThinking(m),
               maxTokensField: null,
               developerRole: null,
-              replayReasoningContent: true as const,
+              // The guide states replay for reasoning models only.
+              replayReasoningContent: openRouterReasoning(
+                m,
+                gateway?.efforts,
+                gateway?.toggle !== undefined,
+              )
+                ? (true as const)
+                : null,
               store: null,
               strictTools: null,
               sessionAffinity: null,
@@ -465,7 +472,13 @@ async function listModels(
                             },
                           }
                         : {}),
-                      replayReasoningContent: replaySource,
+                      ...(openRouterReasoning(
+                        m,
+                        gateway?.efforts,
+                        gateway?.toggle !== undefined,
+                      )
+                        ? { replayReasoningContent: replaySource }
+                        : {}),
                     },
                   }
                 : {}),

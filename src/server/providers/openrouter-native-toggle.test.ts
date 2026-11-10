@@ -194,6 +194,27 @@ it('rejects present malformed native metadata while null and absent facts stay u
   expect(openRouterReasoning({ reasoning: {} })).toBeNull()
 })
 
+it('states reasoning_content replay only on reasoning rows', async () => {
+  const data = docs.nativeEffortModels.data
+  const plain = { ...data[1], id: 'test/plain-chat', reasoning: null }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string | URL | Request) => {
+      const url = requestUrl(input)
+      if (url === 'https://openrouter.ai/api/v1/models')
+        return Response.json({ ...docs.nativeEffortModels, data: [plain] })
+      if (url === docs.sourceUrl) return new Response(docs.markdown)
+      throw new Error('unexpected URL ' + url)
+    }),
+  )
+  const listed = await openrouterProvider.listModels({})
+  expect(listed.models[0]?.reasoning).toBeNull()
+  expect(listed.models[0]?.requestMap?.replayReasoningContent).toBeNull()
+  expect(
+    listed.models[0]?.factSources?.requestMapFields?.replayReasoningContent,
+  ).toBeUndefined()
+})
+
 it('sources high only from an actual accepted native enum and leaves another native model wire unknown', async () => {
   vi.stubGlobal(
     'fetch',
