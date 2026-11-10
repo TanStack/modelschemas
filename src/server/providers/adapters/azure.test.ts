@@ -96,6 +96,7 @@ function stubFetch(
   urls: Array<string> = [],
   pricingPage = PRICING_PAGE,
   reasoning = REASONING,
+  prices: Record<string, unknown> | 'throttle-page-2' = PRICES,
 ) {
   globalThis.fetch = ((input: string, init?: RequestInit) => {
     const url = String(input)
@@ -106,7 +107,16 @@ function stubFetch(
         new Response(url === AZURE_MODELS_URL ? models : reasoning),
       )
     }
-    if (url in PRICES) return Promise.resolve(Response.json(PRICES[url]))
+    if (prices === 'throttle-page-2' && url === PAGE_TWO) {
+      return Promise.resolve(
+        new Response('Too many requests at this point. Please retry later.', {
+          status: 429,
+          statusText: 'Too Many Requests',
+        }),
+      )
+    }
+    const priceDoc = prices === 'throttle-page-2' ? PRICES : prices
+    if (url in priceDoc) return Promise.resolve(Response.json(priceDoc[url]))
     if (url === AZURE_PRICING_PAGE_URL) {
       return Promise.resolve(new Response(pricingPage))
     }
@@ -120,7 +130,7 @@ function stubFetch(
 describe('azure', () => {
   it('lists the tabulated models with facts, price, and sources', async () => {
     stubFetch(MODELS)
-    const { models } = await provider.listModels({})
+    const { models, docsFailures } = await provider.listModels({})
 
     expect(models.map((model) => [model.rawId, model.activity])).toEqual([
       ['o3', 'chat'],
@@ -160,11 +170,39 @@ describe('azure', () => {
     expect(o3?.factSources?.pricing?.sourceUrl).toBe(AZURE_PRICES_URL)
     expect(o3?.factSources?.maxOutput?.sourceUrl).toBe(AZURE_MODELS_URL)
     expect(models[1]?.pricing).toBeNull()
+    expect(docsFailures).toEqual({ failed: 0, skipped: 0, first: [] })
   })
 
-  it('throws when the pricing page labels no threshold', async () => {
+  it('keeps the poll when a later retail prices page is throttled', async () => {
+    stubFetch(MODELS, [], PRICING_PAGE, REASONING, 'throttle-page-2')
+    const { models, docsFailures } = await provider.listModels({})
+
+    expect(models.map((model) => model.rawId)).toEqual(['o3', 'gpt-image-2'])
+    expect(models[0]).toMatchObject({
+      contextWindow: 200_000,
+      reasoning: {
+        mode: 'effort',
+        mandatory: null,
+        efforts: ['low', 'medium', 'high'],
+      },
+      absent: { pricing: 'unavailable' },
+    })
+    expect(models[0]?.pricing).toBeNull()
+    expect(docsFailures).toMatchObject({ failed: 1, skipped: 0 })
+    expect(docsFailures?.first).toHaveLength(1)
+    expect(docsFailures?.first[0]?.source).toBe(AZURE_PRICES_URL)
+    expect(docsFailures?.first[0]?.error).toContain(
+      `${PAGE_TWO} → 429 Too Many Requests`,
+    )
+  })
+
+  it('reports a docs failure when the pricing page labels no threshold', async () => {
     stubFetch(MODELS, [], '<td>GPT-5.4 Global</td>')
-    await expect(provider.listModels({})).rejects.toThrow(
+    const { models, docsFailures } = await provider.listModels({})
+
+    expect(models.map((model) => model.rawId)).toEqual(['o3', 'gpt-image-2'])
+    expect(models[0]?.absent).toEqual({ pricing: 'unavailable' })
+    expect(docsFailures?.first[0]?.error).toContain(
       'labels no context-length threshold',
     )
   })

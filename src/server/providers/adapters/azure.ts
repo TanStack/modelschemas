@@ -19,7 +19,14 @@ import {
   azureModelPricing,
   fetchAzurePrices,
 } from '../azure-pricing.ts'
-import { assertParsed, cachedDocs } from '../model-facts.ts'
+import {
+  assertParsed,
+  cachedDocs,
+  docsReport,
+  docsRun,
+  tryDocs,
+  unavailable,
+} from '../model-facts.ts'
 import { classifyOpenAiCompat } from '../openai-compat.ts'
 import { fetchOpenApi, fetchText, sha256Text } from '../types.ts'
 import type {
@@ -52,6 +59,7 @@ async function listModels(
   _env: ProviderSecrets,
   kv?: KVNamespace,
 ): Promise<ListModelsResult> {
+  const docs = docsRun()
   const [models, reasoning, prices, chatTokens] = await Promise.all([
     learnDoc(kv, AZURE_MODELS_URL, parseAzureModels),
     cachedDocs(kv, AZURE_REASONING_URL, async () => {
@@ -67,7 +75,11 @@ async function listModels(
         hash: await sha256Text(markdown),
       }
     }),
-    cachedDocs(kv, AZURE_PRICES_URL, fetchAzurePrices),
+    // One throttled page throws. That keeps the stored cards; the next
+    // poll is the retry. The models article stays outside this wrapper.
+    tryDocs(docs, AZURE_PRICES_URL, (cached) =>
+      cached(kv, AZURE_PRICES_URL, fetchAzurePrices),
+    ),
     cachedDocs(kv, AZURE_SPEC_URL, async () => {
       const { spec, hash } = await fetchOpenApi(AZURE_SPEC_URL)
       return { maxTokensField: azureChatMaxTokensField(spec), hash }
@@ -82,7 +94,9 @@ async function listModels(
     models: Object.values(models.rows)
       .filter(
         (row) =>
-          row.tabulated || azureMetered(prices.meters, row.rawId, tabulated),
+          row.tabulated ||
+          (prices !== null &&
+            azureMetered(prices.meters, row.rawId, tabulated)),
       )
       .map((row) => {
         const info = azureModelInfo(row, reasoning.rows[row.rawId], hashes, {
@@ -91,6 +105,7 @@ async function listModels(
           chatMaxTokens: chatTokens.maxTokensField,
         })
         if (row.activity !== 'chat') return info
+        if (!prices) return { ...info, ...unavailable('pricing') }
         const priced = azureModelPricing(prices, row.rawId, row.version)
         return {
           ...info,
@@ -98,6 +113,7 @@ async function listModels(
           factSources: { ...info.factSources, ...priced.factSources },
         }
       }),
+    docsFailures: docsReport(docs),
   }
 }
 
