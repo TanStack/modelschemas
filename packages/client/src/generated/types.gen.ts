@@ -768,6 +768,7 @@ export type Model = {
     | 'embeddings'
     | 'moderation'
     | 'world'
+    | 'decision'
     | null
   displayName: string | null
   schemaEndpointId: string | null
@@ -891,6 +892,7 @@ export type ExportModel = {
     | 'embeddings'
     | 'moderation'
     | 'world'
+    | 'decision'
     | null
   displayName: string | null
   schemaEndpointId: string | null
@@ -1242,6 +1244,7 @@ export type ListModelsData = {
       | 'embeddings'
       | 'moderation'
       | 'world'
+      | 'decision'
     provider?: string
     /**
      * A capability flag the model is stated to support: matches rows whose capabilities map has this key set to true (capability=tools). Exact flag name, not a substring.
@@ -1377,6 +1380,7 @@ export type GetActivitySchemasData = {
       | 'embeddings'
       | 'moderation'
       | 'world'
+      | 'decision'
   }
   query?: never
   url: '/v1/schemas/{provider}/{activity}'
@@ -1422,6 +1426,7 @@ export type GetSchemaData = {
       | 'embeddings'
       | 'moderation'
       | 'world'
+      | 'decision'
     /**
      * Path-derived endpoint id (URL-encode slashes), or a listed model rawId/slug which aliases onto that activity's generation route and pins the request `model` field.
      */
@@ -1492,6 +1497,7 @@ export type GetProviderOpenApiData = {
       | 'embeddings'
       | 'moderation'
       | 'world'
+      | 'decision'
   }
   url: '/v1/openapi/{provider}'
 }

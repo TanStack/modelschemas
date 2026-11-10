@@ -195,7 +195,8 @@
                 "audio",
                 "embeddings",
                 "moderation",
-                "world"
+                "world",
+                "decision"
               ]
             }
           },
@@ -395,7 +396,8 @@
                 "audio",
                 "embeddings",
                 "moderation",
-                "world"
+                "world",
+                "decision"
               ]
             }
           }
@@ -452,7 +454,8 @@
                 "audio",
                 "embeddings",
                 "moderation",
-                "world"
+                "world",
+                "decision"
               ]
             }
           },
@@ -575,7 +578,8 @@
                 "audio",
                 "embeddings",
                 "moderation",
-                "world"
+                "world",
+                "decision"
               ]
             }
           }
@@ -2567,7 +2571,8 @@
                 "audio",
                 "embeddings",
                 "moderation",
-                "world"
+                "world",
+                "decision"
               ]
             },
             "additionalProperties": {
@@ -2864,6 +2869,7 @@
               "embeddings",
               "moderation",
               "world",
+              "decision",
               null
             ]
           },
@@ -3213,6 +3219,7 @@
               "embeddings",
               "moderation",
               "world",
+              "decision",
               null
             ]
           },

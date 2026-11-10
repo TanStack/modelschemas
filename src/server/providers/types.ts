@@ -735,6 +735,12 @@ export interface ProviderConfig {
   /** How to call the provider; assembled into GET /v1/openapi/{id}. */
   connect?: ProviderConnect
   /**
+   * The caller names the model (a local server: bare `laya`, custom
+   * `acme/triage`, digests), so GET /v1/openapi/{id} leaves `model` an
+   * open string instead of the listed ids.
+   */
+  openModelNames?: true
+  /**
    * Per-activity override when one provider has multiple data planes
    * (BytePlus Ark vs Seed Speech). Mixed selections drop overridden
    * activities from the default document.

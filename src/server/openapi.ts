@@ -43,6 +43,7 @@ const activityEnum = [
   'embeddings',
   'moderation',
   'world',
+  'decision',
 ]
 
 const changeTypeEnum = [

@@ -21,13 +21,14 @@ const ACTIVITIES = [
   'embeddings',
   'moderation',
   'world',
+  'decision',
 ]
 
 export const WEBMCP_TOOLS: Array<WebMcpToolDefinition> = [
   {
     name: 'list_models',
     description:
-      'Cross-provider model catalog: which AI models exist right now, filterable by activity (chat/image/video/audio/embeddings/moderation/world), provider, capability flag (a flag the model is stated to support, e.g. tools), or free text.',
+      'Cross-provider model catalog: which AI models exist right now, filterable by activity (chat/image/video/audio/embeddings/moderation/world/decision), provider, capability flag (a flag the model is stated to support, e.g. tools), or free text.',
     inputSchema: {
       type: 'object',
       properties: {
