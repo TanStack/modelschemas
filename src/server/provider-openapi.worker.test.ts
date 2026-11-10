@@ -1580,3 +1580,99 @@ describe('openModelNames', () => {
     expect(schema?.properties?.model?.enum).toBeUndefined()
   })
 })
+
+describe('modelHeader', () => {
+  it('heads each Fish Audio route with the ids bound to it or its parent', async () => {
+    await db
+      .insert(providers)
+      .values({
+        id: 'fish-audio',
+        displayName: 'Fish Audio',
+        specSourceUrl: 'https://example.com/fish.json',
+      })
+      .onConflictDoNothing()
+    const paths = [
+      '/v1/tts',
+      '/v1/tts/stream/with-timestamp',
+      '/v1/asr',
+      '/model',
+    ]
+    await db
+      .insert(endpoints)
+      .values(
+        paths.map((path) => ({
+          id: `fish-audio${path}`,
+          providerId: 'fish-audio',
+          activity: 'audio' as const,
+          method: 'POST',
+          path,
+        })),
+      )
+      .onConflictDoNothing()
+    await db
+      .insert(schemaVersions)
+      .values(
+        paths.map((path) => ({
+          id: `fish-audio${path}:input`,
+          endpointId: `fish-audio${path}`,
+          kind: 'input' as const,
+          contentHash: 'f'.repeat(64),
+          schema: JSON.stringify(INPUT),
+          createdAt: NOW,
+        })),
+      )
+      .onConflictDoNothing()
+    await db
+      .insert(models)
+      .values(
+        [
+          ['s2.1-pro', 'v1/tts'],
+          ['drama-3', 'v1/tts'],
+          ['transcribe-1-pro', 'v1/asr'],
+          ['transcribe-stream-1', null],
+        ].map(([rawId, route]) => ({
+          id: `fish-audio-${rawId}`,
+          providerId: 'fish-audio',
+          rawId: rawId ?? '',
+          activity: 'audio' as const,
+          schemaEndpointId: route,
+          firstSeenAt: NOW,
+          lastSeenAt: NOW,
+        })),
+      )
+      .onConflictDoNothing()
+
+    const headers = async (model?: string) => {
+      const result = await assembleProviderOpenApi(
+        db,
+        'fish-audio',
+        model ? { model } : {},
+      )
+      if (!result.ok) throw new Error(result.message)
+      const docPaths = result.document.paths as Record<
+        string,
+        { post?: { parameters?: Array<{ schema: { enum?: unknown } }> } }
+      >
+      return Object.fromEntries(
+        paths.map((path) => [
+          path,
+          docPaths[path]?.post?.parameters?.map((p) => p.schema.enum) ?? [],
+        ]),
+      )
+    }
+
+    const tts = ['drama-3', 's2.1-pro']
+    expect(await headers()).toEqual({
+      '/v1/tts': [tts],
+      '/v1/tts/stream/with-timestamp': [tts],
+      '/v1/asr': [['transcribe-1-pro']],
+      '/model': [],
+    })
+    expect(await headers('s2.1-pro')).toEqual({
+      '/v1/tts': [['s2.1-pro']],
+      '/v1/tts/stream/with-timestamp': [['s2.1-pro']],
+      '/v1/asr': [],
+      '/model': [],
+    })
+  })
+})

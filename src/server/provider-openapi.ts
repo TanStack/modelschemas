@@ -370,6 +370,16 @@ function buildOperation(
   const parameters = [
     ...pathParamsFromPath(endpoint.path),
     ...headerParams(connect.requiredHeaders),
+    ...(connect.modelHeader && modelIds.length > 0
+      ? [
+          {
+            name: connect.modelHeader,
+            in: 'header',
+            required: false,
+            schema: { type: 'string', enum: modelIds },
+          },
+        ]
+      : []),
   ]
   const pinned = pinnedModel
     ? pinPathParams(parameters, pinnedModel)
@@ -1252,19 +1262,35 @@ export async function assembleProviderOpenApi(
   } else {
     const built = owners ? buildModelComponents(selected, owners) : undefined
     if (built) queueSchemas = built.schemas
-    const modelIds =
-      owners !== undefined
+    const catalog =
+      owners !== undefined ||
+      (pinnedModel && !connect.modelHeader) ||
+      config?.openModelNames
         ? []
-        : pinnedModel
-          ? [pinnedModel]
-          : config?.openModelNames
-            ? []
-            : (
-                await listModelsCatalog(db, {
-                  provider: providerId,
-                  activity,
-                })
-              ).models.map((m) => m.rawId)
+        : (
+            await listModelsCatalog(db, {
+              provider: providerId,
+              activity,
+            })
+          ).models
+    const modelIds = pinnedModel ? [pinnedModel] : catalog.map((m) => m.rawId)
+    // A header-selected model (Fish Audio) differs per route: TTS and ASR
+    // take different ids, so each operation lists the ids bound to it or
+    // to a parent route (`v1/tts` for `v1/tts/stream/with-timestamp`). A
+    // route with none (voice-model create) gets no model header; a pinned
+    // model only heads the routes it binds to.
+    const idsFor = (endpointId: string) =>
+      connect.modelHeader
+        ? catalog
+            .filter(
+              (m) =>
+                (!pinnedModel || m.rawId === pinnedModel) &&
+                m.schemaEndpointId !== null &&
+                (endpointId === m.schemaEndpointId ||
+                  endpointId.startsWith(`${m.schemaEndpointId}/`)),
+            )
+            .map((m) => m.rawId)
+        : modelIds
     // An upstream `#stream` path key (Mistral) is the same URL. Twins are
     // built aside and merged into the base once their schemas are hoisted.
     for (const endpoint of built?.endpoints ?? selected) {
@@ -1275,7 +1301,7 @@ export async function assembleProviderOpenApi(
         providerId,
         { ...endpoint, path },
         connect,
-        owner !== undefined ? [owner] : modelIds,
+        owner !== undefined ? [owner] : idsFor(endpoint.id),
         pinnedModel,
       )) {
         const item = target[op.path] ?? {}
