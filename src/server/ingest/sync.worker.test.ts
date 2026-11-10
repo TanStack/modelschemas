@@ -1,9 +1,10 @@
+import { bodyText, requestUrl } from '#/lib/text.ts'
 import { providerRegistry } from '../providers/index.ts'
 import { assembleProviderOpenApi } from '../provider-openapi.ts'
 import { pollProviderModels } from './poll-models.ts'
 import { provider as gatewayProvider } from '../providers/adapters/cloudflare-ai-gateway.ts'
 import { getActivitySchemaMap, getEndpointSchema } from '../schemas-api.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { env } from 'cloudflare:test'
 import { and, eq } from 'drizzle-orm'
 
@@ -17,8 +18,11 @@ import {
 
 import type { OpenApiDocument, ProviderConfig } from '../providers/types.ts'
 import { EXTRACTOR_VERSION } from './bundle.ts'
+import { D1_WINDOW_WAIT_MS } from './d1-window.ts'
+import { POSTHOG_CAPTURE_URL } from './ingest-signals.ts'
+import type { PostHogBatch } from './ingest-signals.ts'
 import { MODELS_DEV_API_URL } from './retire-models-dev.ts'
-import { syncProvider } from './sync.ts'
+import { syncAllProviders, syncProvider } from './sync.ts'
 import type { SyncDeps } from './sync.ts'
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` })
@@ -631,4 +635,184 @@ it('keeps per-model logical schema identities on one real multi-activity HTTP pa
   } finally {
     providerRegistry.splice(providerRegistry.indexOf(configured), 1)
   }
+})
+
+describe('D1 overload window on spec sync (issue #635)', () => {
+  const overload =
+    'D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window'
+
+  async function postedEvents(
+    run: () => Promise<void>,
+  ): Promise<PostHogBatch['batch']> {
+    const batches: Array<PostHogBatch> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(async (input, init) => {
+        if (requestUrl(input) === POSTHOG_CAPTURE_URL) {
+          batches.push(JSON.parse(bodyText(init?.body)) as PostHogBatch)
+        }
+        return new Response('', { status: 200 })
+      }),
+    )
+    try {
+      await run()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    return batches.flatMap((batch) => batch.batch)
+  }
+
+  function overloadProvider(id: string, order: Array<string>, fail: boolean) {
+    let calls = 0
+    const provider = stubProvider(id, fixtureSpec(false))
+    provider.fetchSpec = () => {
+      calls++
+      order.push(id)
+      if (fail || calls === 1) return Promise.reject(new Error(overload))
+      return Promise.resolve({
+        specs: [fixtureSpec(false)],
+        sources: [STUB_SOURCE],
+        outputStrategy: 'post-200' as const,
+      })
+    }
+    return { provider, calls: () => calls }
+  }
+
+  it('retries one D1 overload and leaves the provider active', async () => {
+    const id = 'sync-overload-ok'
+    const nextId = 'sync-overload-ok-next'
+    const deps = await freshDeps(id)
+    await deps.db.insert(providers).values({
+      id: nextId,
+      displayName: 'Stub',
+      specSourceUrl: 'https://example.com/spec.json',
+      status: 'degraded',
+    })
+    await deps.db
+      .update(providers)
+      .set({ status: 'degraded' })
+      .where(eq(providers.id, id))
+    deps.secrets.POSTHOG_PROJECT_KEY = 'phc_test'
+    const order: Array<string> = []
+    const first = overloadProvider(id, order, false)
+    const next = stubProvider(nextId, fixtureSpec(false))
+    const original = next.fetchSpec
+    next.fetchSpec = (providerEnv) => {
+      order.push(nextId)
+      return original(providerEnv)
+    }
+    const waits: Array<number> = []
+    const events = await postedEvents(async () => {
+      const outcomes = await syncAllProviders(
+        deps,
+        [first.provider, next],
+        (ms) => {
+          waits.push(ms)
+          order.push('wait')
+          return Promise.resolve()
+        },
+      )
+      expect(outcomes[0]).toMatchObject({
+        providerId: id,
+        endpointsSeen: 1,
+      })
+      expect(outcomes[0]?.error).toBeUndefined()
+      expect(outcomes[1]).toMatchObject({
+        providerId: nextId,
+        endpointsSeen: 1,
+      })
+    })
+    expect(first.calls()).toBe(2)
+    expect(order).toEqual([id, 'wait', id, nextId])
+    expect(waits).toEqual([D1_WINDOW_WAIT_MS])
+    expect(events.filter((event) => event.event === 'ingest_failed')).toEqual(
+      [],
+    )
+    const row = await deps.db.query.providers.findFirst({
+      where: eq(providers.id, id),
+    })
+    expect(row?.status).toBe('active')
+    const still = await deps.db.query.providers.findFirst({
+      where: eq(providers.id, nextId),
+    })
+    expect(still?.status).toBe('active')
+  })
+
+  it('records ingest_failed and degraded when the retry overloads too', async () => {
+    const id = 'sync-overload-fail'
+    const nextId = 'sync-overload-fail-next'
+    const deps = await freshDeps(id)
+    await deps.db.insert(providers).values({
+      id: nextId,
+      displayName: 'Stub',
+      specSourceUrl: 'https://example.com/spec.json',
+    })
+    deps.secrets.POSTHOG_PROJECT_KEY = 'phc_test'
+    const order: Array<string> = []
+    const first = overloadProvider(id, order, true)
+    const next = stubProvider(nextId, fixtureSpec(false))
+    const original = next.fetchSpec
+    next.fetchSpec = (providerEnv) => {
+      order.push(nextId)
+      return original(providerEnv)
+    }
+    const events = await postedEvents(async () => {
+      const outcomes = await syncAllProviders(
+        deps,
+        [first.provider, next],
+        (ms) => {
+          order.push('wait')
+          expect(ms).toBe(D1_WINDOW_WAIT_MS)
+          return Promise.resolve()
+        },
+      )
+      expect(outcomes[0]).toMatchObject({
+        providerId: id,
+        endpointsSeen: 0,
+        error: overload,
+      })
+      expect(outcomes[1]).toMatchObject({
+        providerId: nextId,
+        endpointsSeen: 1,
+      })
+    })
+    expect(first.calls()).toBe(2)
+    expect(order).toEqual([id, 'wait', id, 'wait', nextId])
+    expect(
+      events.filter((event) => event.event === 'ingest_failed'),
+    ).toMatchObject([
+      {
+        event: 'ingest_failed',
+        properties: { job: 'spec-sync', providerId: id, error: overload },
+      },
+    ])
+    const row = await deps.db.query.providers.findFirst({
+      where: eq(providers.id, id),
+    })
+    expect(row?.status).toBe('degraded')
+    expect(await providerEndpoints(deps.db, nextId)).toHaveLength(1)
+  })
+
+  it('does not retry a failure that is not a spent D1 window', async () => {
+    const id = 'sync-overload-other'
+    const deps = await freshDeps(id)
+    let calls = 0
+    const provider = stubProvider(id, fixtureSpec(false))
+    provider.fetchSpec = () => {
+      calls++
+      return Promise.reject(new Error('listing 503'))
+    }
+    const waits: Array<number> = []
+    const outcomes = await syncAllProviders(deps, [provider], (ms) => {
+      waits.push(ms)
+      return Promise.resolve()
+    })
+    expect(calls).toBe(1)
+    expect(waits).toEqual([])
+    expect(outcomes[0]?.error).toContain('listing 503')
+    const row = await deps.db.query.providers.findFirst({
+      where: eq(providers.id, id),
+    })
+    expect(row?.status).toBe('degraded')
+  })
 })

@@ -36,6 +36,12 @@ import type {
 } from '#/server/providers/types.ts'
 import { hasAsyncApiFlag, withAsyncApiFlag } from './asyncapi.ts'
 import {
+  D1_WINDOW_WAIT_MS,
+  d1WindowExhausted,
+  retryOnceAfterD1Window,
+  sleep,
+} from './d1-window.ts'
+import {
   captureIngestEvents,
   ingestFailedEvent,
   noteIngest,
@@ -655,19 +661,53 @@ export function specSyncShard(shardIndex: number): Array<ProviderConfig> {
 }
 
 /**
+ * Best-effort. A spent D1 window fails this write the same way the sync
+ * failed; the caller waits that window out before calling it. A failure
+ * here must not sink the rest of the shard.
+ */
+async function markProviderDegraded(
+  deps: SyncDeps,
+  providerId: string,
+): Promise<void> {
+  try {
+    await deps.db
+      .update(providers)
+      .set({ status: 'degraded' })
+      .where(eq(providers.id, providerId))
+  } catch (statusError) {
+    const message = `degraded-status write failed: ${errorMessage(statusError)}`
+    console.error(
+      JSON.stringify({ job: 'spec-sync', providerId, error: message }),
+    )
+    noteIngest(ingestFailedEvent('spec-sync', providerId, message))
+  }
+}
+
+/**
  * Sync the given providers (default: the full registry), sequentially
  * (subrequest limits), with per-provider isolation: one provider's outage
- * doesn't sink the run.
+ * doesn't sink the run. A spent D1 window is retried once after
+ * `D1_WINDOW_WAIT_MS` (issue #635). A second one still fails, and the
+ * degraded write waits out that window so it is not lost on the same overload.
  */
 export async function syncAllProviders(
   deps: SyncDeps,
   providersToSync: Array<ProviderConfig> = providerRegistry,
+  wait: (ms: number) => Promise<void> = sleep,
 ): Promise<Array<SyncOutcome>> {
   const outcomes: Array<SyncOutcome> = []
   for (const provider of providersToSync) {
-    await runIngestScope(async () => {
+    const exhausted = await runIngestScope(async () => {
       try {
-        outcomes.push(await syncProvider(deps, provider))
+        outcomes.push(
+          await retryOnceAfterD1Window(
+            'spec-sync',
+            provider.id,
+            () => syncProvider(deps, provider),
+            wait,
+          ),
+        )
+        return false
       } catch (error) {
         const message = errorMessage(error)
         // Own log line per failure: the aggregate outcomes blob can exceed
@@ -688,33 +728,25 @@ export async function syncAllProviders(
           error: message,
           warnings: [],
         })
-        try {
-          await deps.db
-            .update(providers)
-            .set({ status: 'degraded' })
-            .where(eq(providers.id, provider.id))
-        } catch (statusError) {
-          // Best-effort: if the failure was resource exhaustion (subrequest
-          // budget), this write fails too — don't let it sink the run.
-          console.error(
-            JSON.stringify({
-              job: 'spec-sync',
-              providerId: provider.id,
-              error: `degraded-status write failed: ${errorMessage(statusError)}`,
-            }),
-          )
-          noteIngest(
-            ingestFailedEvent(
-              'spec-sync',
-              provider.id,
-              `degraded-status write failed: ${errorMessage(statusError)}`,
-            ),
-          )
-        }
+        const spent = d1WindowExhausted(message)
+        // A non-window failure can write status now. A spent window cannot:
+        // that write failed in production on the same overload (issue #635).
+        if (!spent) await markProviderDegraded(deps, provider.id)
+        return spent
       } finally {
         await captureIngestEvents(deps.secrets.POSTHOG_PROJECT_KEY)
       }
     })
+    if (exhausted) {
+      await wait(D1_WINDOW_WAIT_MS)
+      await runIngestScope(async () => {
+        try {
+          await markProviderDegraded(deps, provider.id)
+        } finally {
+          await captureIngestEvents(deps.secrets.POSTHOG_PROJECT_KEY)
+        }
+      })
+    }
   }
   return outcomes
 }
