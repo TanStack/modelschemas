@@ -352,6 +352,7 @@ export const activities = [
   'embeddings',
   'moderation',
   'world',
+  'decision',
 ] as const
 export type Activity = (typeof activities)[number]
 

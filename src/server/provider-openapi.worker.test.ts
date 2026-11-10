@@ -1513,3 +1513,70 @@ describe('assembleProviderOpenApi', () => {
     ).toMatchObject({ ok: false, status: 404, code: 'unknown_model' })
   })
 })
+
+describe('openModelNames', () => {
+  it('leaves Ollaya model an open string although laya rows are listed', async () => {
+    await db
+      .insert(providers)
+      .values({
+        id: 'ollaya',
+        displayName: 'Ollaya',
+        specSourceUrl: 'https://example.com/o.md',
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(endpoints)
+      .values({
+        id: 'ollaya/v1/systemone',
+        providerId: 'ollaya',
+        activity: 'decision',
+        method: 'POST',
+        path: '/v1/systemone',
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(schemaVersions)
+      .values({
+        id: 'ollaya/v1/systemone:input',
+        endpointId: 'ollaya/v1/systemone',
+        kind: 'input',
+        contentHash: 'c'.repeat(64),
+        schema: JSON.stringify(INPUT),
+        createdAt: NOW,
+      })
+      .onConflictDoNothing()
+    await db
+      .insert(models)
+      .values({
+        id: 'ollaya-laya-en',
+        providerId: 'ollaya',
+        rawId: 'laya:en',
+        activity: 'decision',
+        firstSeenAt: NOW,
+        lastSeenAt: NOW,
+      })
+      .onConflictDoNothing()
+    const result = await assembleProviderOpenApi(db, 'ollaya')
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const paths = result.document.paths as Record<
+      string,
+      {
+        post?: {
+          requestBody?: {
+            content: {
+              'application/json': {
+                schema: { properties?: { model?: { enum?: unknown } } }
+              }
+            }
+          }
+        }
+      }
+    >
+    const schema =
+      paths['/v1/systemone']?.post?.requestBody?.content['application/json']
+        .schema
+    expect(schema?.properties?.model).toBeDefined()
+    expect(schema?.properties?.model?.enum).toBeUndefined()
+  })
+})

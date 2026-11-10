@@ -1257,12 +1257,14 @@ export async function assembleProviderOpenApi(
         ? []
         : pinnedModel
           ? [pinnedModel]
-          : (
-              await listModelsCatalog(db, {
-                provider: providerId,
-                activity,
-              })
-            ).models.map((m) => m.rawId)
+          : config?.openModelNames
+            ? []
+            : (
+                await listModelsCatalog(db, {
+                  provider: providerId,
+                  activity,
+                })
+              ).models.map((m) => m.rawId)
     // An upstream `#stream` path key (Mistral) is the same URL. Twins are
     // built aside and merged into the base once their schemas are hoisted.
     for (const endpoint of built?.endpoints ?? selected) {

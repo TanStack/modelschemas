@@ -16,10 +16,10 @@ import { changes, providers } from '#/db/schema.ts'
 import { openApiDocument } from '#/server/openapi.ts'
 
 export const MODEL_ROW_SHAPE = {
-  version: 7,
-  hash: '389ba1a078911926b0373c8b371678f8e2fac81b476360bf8794f2aa6f7ee90b',
+  version: 8,
+  hash: '66ce1bb03eb5e6a41bab72a3ecaa287e4f35d0d6d09ff0b4300c6b892fb5e844',
   notes:
-    'Activity gained world for World Labs Marble world generation (issue #617).',
+    'Activity gained decision for typed-question models answered over POST /v1/systemone (Ollaya, issue #620).',
 } as const
 
 /** Every component schema a /v1 model row response is built from. */
