@@ -1025,7 +1025,7 @@ export const openApiDocument = {
                 completeness: {
                   type: 'object',
                   description:
-                    'The gap-report score over the live chat models of the provider: the share filled of the eleven chat facts (contextWindow, maxOutput, modalities, priced, cacheRead, capabilities, reasoning, efforts, requestMap, endpoint, replayReasoningContent). Summed per model, each fact counted only where it applies; provider-wide and exact-model source-silent exceptions are excluded. Computed at the models poll (completenessComputedAt), not per request.',
+                    'The gap-report score over the live chat models of the provider: the share filled of the eleven chat facts (contextWindow, maxOutput, modalities, priced, cacheRead, capabilities, reasoning, efforts, requestMap, endpoint, replayReasoningContent). Summed per model, each fact counted only where it applies. requestMap applies on chat/completions, completions, and responses routes. replayReasoningContent applies on chat/completions routes whose rows reason. A stated cached-input absence (factSources.cacheRead path not-offered) fills cacheRead. Provider-wide and exact-model source-silent exceptions are excluded. Computed at the models poll (completenessComputedAt), not per request.',
                   required: ['score', 'chat', 'filled', 'needed', 'silent'],
                   properties: {
                     score: {

@@ -47,12 +47,18 @@ export function failing(
 ): Array<string> {
   if (!names) {
     return report.providers
-      .filter((p) => p.chat > 0 && p.score < target)
+      .filter((p) => p.chat > 0 && p.score != null && p.score < target)
       .map((p) => p.provider)
   }
   const scores = new Map(report.providers.map((p) => [p.provider, p.score]))
-  // A named provider with no rows at all fails too.
-  return names.filter((name) => (scores.get(name) ?? 0) < target)
+  // A named provider with no rows at all fails. A provider that does not
+  // serve chat scores null and is not below target.
+  return names.filter((name) => {
+    const score = scores.get(name)
+    if (score === undefined) return true
+    if (score === null) return false
+    return score < target
+  })
 }
 
 export function formatTable(report: GapReport): string {
@@ -68,7 +74,7 @@ export function formatTable(report: GapReport): string {
   ]
   const body = report.providers.map((p) => [
     p.provider,
-    p.score.toFixed(2),
+    p.score == null ? 'n/a' : p.score.toFixed(2),
     String(p.rows),
     String(p.chat),
     String(p.noActivity),

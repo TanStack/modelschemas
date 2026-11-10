@@ -62,6 +62,33 @@ export function openRouterGatewayToggle(markdown: string): ThinkingRequest {
   return { on: body('adaptive'), off: body('disabled'), levels: null }
 }
 
+/**
+ * The guide states `reasoning_content` as an alias of `reasoning`, and
+ * `reasoning_details` replay, for every supported reasoning model. A model
+ * exception would have to be named. Throws when that statement is gone.
+ */
+export function openRouterReasoningContentReplay(markdown: string): true {
+  const prose = markdown.replace(/```[\s\S]*?```/g, '')
+  if (
+    !/You can also use `reasoning_content` as an alias - it functions identically to `reasoning`\./.test(
+      prose,
+    )
+  ) {
+    throw new Error('openrouter: reasoning_content alias missing')
+  }
+  const section = prose.split(/^## Preserving Reasoning\s*$/m)[1]
+  if (
+    !section ||
+    !/you can pass it back to the API/.test(section) ||
+    !/The `reasoning_details` functionality works identically across all supported reasoning models\./.test(
+      prose,
+    )
+  ) {
+    throw new Error('openrouter: reasoning_content replay statement missing')
+  }
+  return true
+}
+
 /** Read actual canonical effort wire fields from the native normalization table. */
 export function openRouterGatewayEffortWire(markdown: string): {
   outer: string

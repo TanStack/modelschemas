@@ -61,6 +61,14 @@ export type ModelRow = {
   } | null
   requestMap?: unknown
   schemaEndpointId?: string | null
+  /**
+   * `cacheRead.path === 'not-offered'` is a stated absence: the provider's
+   * pricing table shows a cached-input cell that is "-" or blank. That
+   * fills the fact. It is not a price.
+   */
+  factSources?: {
+    cacheRead?: { path?: string } | null
+  } | null
 }
 
 export type ProviderReport = {
@@ -73,7 +81,12 @@ export type ProviderReport = {
   silent: Array<FactKey>
   /** Applicable missing rows excluded by exact model-scoped evidence. */
   modelSilent?: Partial<Record<FactKey, number>>
-  score: number
+  /**
+   * 0 to 1. Null when the provider does not serve chat: every row has a
+   * non-chat activity. 0 when it serves chat but classification produced
+   * no chat rows (an activity is null).
+   */
+  score: number | null
   /** Raw ids of the chat rows each flag matches. */
   flags: Record<FlagKey, Array<string>>
 }
@@ -107,6 +120,46 @@ export function parseLedger(markdown: string): Ledger {
     ledger.set(scope, facts)
   }
   return ledger
+}
+
+/**
+ * Public endpoint id, query and leading slash stripped. The route's wire
+ * is this path. There is no provider list.
+ */
+function endpointPath(endpointId: string | null | undefined): string {
+  if (!endpointId) return ''
+  return endpointId.split('?')[0]?.replace(/^\/+/, '') ?? ''
+}
+
+/**
+ * OpenAI-compatible chat wire: `chat/completions`, `completions`, or
+ * `responses`. `ChatRequestMap` describes that wire.
+ */
+function openAiCompatRoute(row: ModelRow): boolean {
+  return /(?:^|\/)(?:chat\/completions|responses|completions)$/.test(
+    endpointPath(row.schemaEndpointId),
+  )
+}
+
+/**
+ * `reasoning_content` is the chat-completions field. Anthropic thinking
+ * blocks, Gemini thought signatures, Responses reasoning items, and
+ * Converse replay on other paths, so those routes are not scored.
+ */
+function reasoningContentRoute(row: ModelRow): boolean {
+  return /(?:^|\/)chat\/completions$/.test(endpointPath(row.schemaEndpointId))
+}
+
+function reasons(row: ModelRow): boolean {
+  return (
+    row.reasoning != null ||
+    supportedFlags(row.capabilities).includes('reasoning')
+  )
+}
+
+/** A null activity is an unclassified chat candidate, not a speech or image API. */
+function servesChat(group: Array<ModelRow>): boolean {
+  return group.some((row) => row.activity === 'chat' || row.activity == null)
 }
 
 function isModelsDev(row: ModelRow): boolean {
@@ -163,7 +216,9 @@ const FACTS: Record<
       hasRate(row, 'output_tokens', 'completion'),
   },
   cacheRead: {
-    have: (row) => hasRate(row, 'cache_read_tokens', 'input_cache_read'),
+    have: (row) =>
+      hasRate(row, 'cache_read_tokens', 'input_cache_read') ||
+      row.factSources?.cacheRead?.path === 'not-offered',
   },
   capabilities: { have: (row) => isCapabilityMap(row.capabilities) },
   // Filled by any stored object, whatever its `mandatory`: null there means
@@ -182,12 +237,13 @@ const FACTS: Record<
       row.reasoning?.mode === 'effort' || row.reasoning?.mode === 'adaptive',
     have: (row) => (row.reasoning?.efforts?.length ?? 0) > 0,
   },
-  requestMap: { have: (row) => row.requestMap != null },
+  requestMap: {
+    need: openAiCompatRoute,
+    have: (row) => row.requestMap != null,
+  },
   endpoint: { have: (row) => row.schemaEndpointId != null },
   replayReasoningContent: {
-    need: (row) =>
-      row.reasoning != null ||
-      supportedFlags(row.capabilities).includes('reasoning'),
+    need: (row) => reasoningContentRoute(row) && reasons(row),
     have: (row) =>
       typeof row.requestMap === 'object' &&
       row.requestMap !== null &&
@@ -304,15 +360,25 @@ export function buildReport(
       facts,
       silent,
       modelSilent,
-      // No chat rows is a gap, not a pass. Chat rows with every needed fact
-      // on the ledger have nothing left to fill.
-      score: need === 0 ? (chat.length > 0 ? 1 : 0) : have / need,
+      // No classified chat rows on a provider that serves chat is a gap.
+      // A provider whose every row is image, audio, or video has nothing
+      // to score. Chat rows with every needed fact on the ledger score 1.
+      score:
+        need === 0
+          ? chat.length > 0
+            ? 1
+            : servesChat(group)
+              ? 0
+              : null
+          : have / need,
       flags,
     }
   })
 
+  const rank = (score: number | null) => score ?? Number.POSITIVE_INFINITY
   providers.sort(
-    (a, b) => a.score - b.score || a.provider.localeCompare(b.provider),
+    (a, b) =>
+      rank(a.score) - rank(b.score) || a.provider.localeCompare(b.provider),
   )
   return { generatedAt: now.toISOString(), providers }
 }

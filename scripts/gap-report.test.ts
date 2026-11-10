@@ -159,10 +159,21 @@ describe('gap report scoring', () => {
     expect(bare.providers[0]).toMatchObject({ chat: 1, score: 1 })
   })
 
-  it('treats rows with no chat rows as a gap', () => {
+  it('treats unclassified rows with no chat rows as a gap', () => {
     const images = provider('images')
     expect(images).toMatchObject({ rows: 2, chat: 0, noActivity: 1, score: 0 })
     expect(report.providers[0]?.provider).toBe('images')
+  })
+
+  it('prints n/a when the provider does not serve chat', () => {
+    const speech = buildReport(
+      [{ provider: 'speech', activity: 'audio' }],
+      new Map(),
+      new Date(0),
+    )
+    expect(speech.providers[0]?.score).toBeNull()
+    expect(formatTable(speech)).toContain('n/a')
+    expect(failing(speech, 1, ['speech', 'absent'])).toEqual(['absent'])
   })
 
   it('needs reasoning only where a row claims it', () => {

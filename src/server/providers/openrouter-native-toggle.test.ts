@@ -3,12 +3,21 @@ import { afterEach, expect, it, vi } from 'vitest'
 import {
   openRouterGatewayEffortWire,
   openRouterGatewayToggle,
+  openRouterReasoningContentReplay,
 } from './openrouter-reasoning.ts'
 import { openRouterReasoning } from './reasoning-config.ts'
 import docs from './fixtures/openrouter-native-toggle.json'
 import { openrouterProvider } from './openrouter.ts'
 import { sha256Text } from './types.ts'
 
+it('reads the API-wide reasoning_content replay statement', () => {
+  expect(openRouterReasoningContentReplay(docs.markdown)).toBe(true)
+  expect(() =>
+    openRouterReasoningContentReplay(
+      docs.markdown.replace('`reasoning_content` as an alias', 'a field'),
+    ),
+  ).toThrow(/alias missing/)
+})
 it('uses host normalized toggle only with explicit native nonmandatory metadata', () => {
   const toggle = openRouterGatewayToggle(docs.markdown)
   expect(
@@ -208,7 +217,14 @@ it('sources high only from an actual accepted native enum and leaves another nat
     sourceHash: await sha256Text(docs.markdown),
   })
   expect(listed.models[1]?.reasoning?.efforts).toEqual(['xhigh', 'medium'])
-  expect(listed.models[1]?.requestMap).toBeNull()
+  expect(listed.models[1]?.requestMap).toMatchObject({
+    thinking: null,
+    replayReasoningContent: true,
+  })
+  const replay =
+    listed.models[1]?.factSources?.requestMapFields?.replayReasoningContent
+  expect(replay?.sourceUrl).toBe(docs.sourceUrl)
+  expect(replay?.path).toContain('reasoning_content')
   expect(() =>
     openRouterGatewayEffortWire('```\n' + docs.markdown + '\n```'),
   ).toThrow()

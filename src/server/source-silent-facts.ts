@@ -30,6 +30,7 @@ export type ApiModelFactSources = Omit<
   | 'serverTools'
   | 'schemaEndpointId'
   | 'requestMapFields'
+  | 'cacheRead'
 > & {
   contextWindow?: ApiFactSource
   maxOutput?: ApiFactSource
@@ -41,7 +42,8 @@ export type ApiModelFactSources = Omit<
   capabilities?: Record<string, FactSource> | SourceSilentEvidence
   serverTools?: Record<string, FactSource> | SourceSilentEvidence
   schemaEndpointId?: ApiFactSource
-  cacheRead?: SourceSilentEvidence
+  /** A stated "-" or blank cached-input cell, or a ledgered absence. */
+  cacheRead?: ApiFactSource
   efforts?: SourceSilentEvidence
 }
 
@@ -164,7 +166,10 @@ export function withSourceSilentEvidence(
         if (schemaEndpointId === null) sources.schemaEndpointId = evidence
         break
       case 'cacheRead':
-        if (missingCacheRead(row.pricing)) sources.cacheRead = evidence
+        // A stored `not-offered` source is the stated absence. The ledger
+        // only fills a price the row does not already explain.
+        if (missingCacheRead(row.pricing) && stored?.cacheRead == null)
+          sources.cacheRead = evidence
         break
       case 'efforts':
         if (
