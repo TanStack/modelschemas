@@ -154,14 +154,19 @@ function isJsonMedia(mediaType: string): boolean {
   return base === 'application/json' || base.endsWith('+json')
 }
 
-function isEventStreamMedia(mediaType: string): boolean {
+/** SSE, or Ollama's newline-delimited JSON. Both carry `streamSchema`. */
+function isStreamMedia(mediaType: string): boolean {
   const base = mediaTypeBase(mediaType)
-  return base === 'text/event-stream' || base.endsWith('/event-stream')
+  return (
+    base === 'text/event-stream' ||
+    base.endsWith('/event-stream') ||
+    base === 'application/x-ndjson'
+  )
 }
 
 /**
  * Success response body. File-like types are binary. `text/plain` is a
- * string. `text/event-stream` uses `streamSchema` when the list also
+ * string. `text/event-stream` and `application/x-ndjson` use `streamSchema` when the list also
  * contains JSON, and never the JSON schema and never a made-up string.
  */
 export function responseMedia(
@@ -183,7 +188,7 @@ export function responseMedia(
       content[mediaType] = { schema: BINARY_SCHEMA }
       continue
     }
-    if (isEventStreamMedia(mediaType)) {
+    if (isStreamMedia(mediaType)) {
       const body =
         streamSchema !== undefined
           ? streamSchema
@@ -350,7 +355,7 @@ function contentTypesFor(
     part === 'body' ||
     (types.some(isJsonMedia) && endpoint.streamSchema === undefined)
   if (!dropStream) return types
-  const rest = types.filter((type) => !isEventStreamMedia(type))
+  const rest = types.filter((type) => !isStreamMedia(type))
   return rest.length > 0 ? rest : null
 }
 
