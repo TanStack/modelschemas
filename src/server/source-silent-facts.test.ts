@@ -119,6 +119,17 @@ describe('source-silent API evidence', () => {
     expect(sources).not.toHaveProperty('requestMap')
     expect(
       withSourceSilentEvidence(
+        model,
+        null,
+        {
+          ...stored,
+          cacheRead: { derivation: 'docs-derived', path: 'not-offered' },
+        },
+        subfacts,
+      )?.cacheRead,
+    ).toEqual({ derivation: 'docs-derived', path: 'not-offered' })
+    expect(
+      withSourceSilentEvidence(
         {
           ...model,
           pricing: { tables: { rate: { base: { cache_read_tokens: 0 } } } },

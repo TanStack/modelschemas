@@ -3,12 +3,21 @@ import { afterEach, expect, it, vi } from 'vitest'
 import {
   openRouterGatewayEffortWire,
   openRouterGatewayToggle,
+  openRouterReasoningContentReplay,
 } from './openrouter-reasoning.ts'
 import { openRouterReasoning } from './reasoning-config.ts'
 import docs from './fixtures/openrouter-native-toggle.json'
 import { openrouterProvider } from './openrouter.ts'
 import { sha256Text } from './types.ts'
 
+it('reads the API-wide reasoning_content replay statement', () => {
+  expect(openRouterReasoningContentReplay(docs.markdown)).toBe(true)
+  expect(() =>
+    openRouterReasoningContentReplay(
+      docs.markdown.replace('`reasoning_content` as an alias', 'a field'),
+    ),
+  ).toThrow(/alias missing/)
+})
 it('uses host normalized toggle only with explicit native nonmandatory metadata', () => {
   const toggle = openRouterGatewayToggle(docs.markdown)
   expect(
@@ -185,6 +194,27 @@ it('rejects present malformed native metadata while null and absent facts stay u
   expect(openRouterReasoning({ reasoning: {} })).toBeNull()
 })
 
+it('states reasoning_content replay only on reasoning rows', async () => {
+  const data = docs.nativeEffortModels.data
+  const plain = { ...data[1], id: 'test/plain-chat', reasoning: null }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string | URL | Request) => {
+      const url = requestUrl(input)
+      if (url === 'https://openrouter.ai/api/v1/models')
+        return Response.json({ ...docs.nativeEffortModels, data: [plain] })
+      if (url === docs.sourceUrl) return new Response(docs.markdown)
+      throw new Error('unexpected URL ' + url)
+    }),
+  )
+  const listed = await openrouterProvider.listModels({})
+  expect(listed.models[0]?.reasoning).toBeNull()
+  expect(listed.models[0]?.requestMap?.replayReasoningContent).toBeNull()
+  expect(
+    listed.models[0]?.factSources?.requestMapFields?.replayReasoningContent,
+  ).toBeUndefined()
+})
+
 it('sources high only from an actual accepted native enum and leaves another native model wire unknown', async () => {
   vi.stubGlobal(
     'fetch',
@@ -208,7 +238,14 @@ it('sources high only from an actual accepted native enum and leaves another nat
     sourceHash: await sha256Text(docs.markdown),
   })
   expect(listed.models[1]?.reasoning?.efforts).toEqual(['xhigh', 'medium'])
-  expect(listed.models[1]?.requestMap).toBeNull()
+  expect(listed.models[1]?.requestMap).toMatchObject({
+    thinking: null,
+    replayReasoningContent: true,
+  })
+  const replay =
+    listed.models[1]?.factSources?.requestMapFields?.replayReasoningContent
+  expect(replay?.sourceUrl).toBe(docs.sourceUrl)
+  expect(replay?.path).toContain('reasoning_content')
   expect(() =>
     openRouterGatewayEffortWire('```\n' + docs.markdown + '\n```'),
   ).toThrow()

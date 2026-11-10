@@ -199,6 +199,12 @@ export interface ModelFactSources {
   trainsOnRequestData?: FactSource
   /** Field-specific evidence when a request map combines native sources. */
   requestMapFields?: Partial<Record<keyof ChatRequestMap, FactSource>>
+  /**
+   * `path: 'not-offered'` when the provider's pricing table shows a
+   * cached-input cell that is "-" or blank. Not a rate, and not a price
+   * of zero.
+   */
+  cacheRead?: FactSource
   /** One source per tool type id in `serverTools`. */
   serverTools?: Record<string, FactSource>
 }
@@ -240,9 +246,13 @@ export interface UpstreamModelIdentity {
  *   OWN request schema or level list.
  * - `null`: unstated. Never read it as `false`: do not offer an off option
  *   from it, and do not claim thinking is forced. A schema SHARED by many
- *   models that lists an off value states nothing about one model, so it is
- *   `null`. A level list with no `none` is not a statement, so it is
- *   `null`. A probe (off returns 400) is not a source.
+ *   models states nothing about one model, with or without an off value,
+ *   so it is `null`. A gateway can drop the off value, so a gateway list
+ *   stays `null` until that model's own source speaks. A probe (off
+ *   returns 400) is not a source.
+ * - A model's OWN exhaustive effort list, with no off value, and no other
+ *   reasoning control, means `mandatory: true`. The list is the only
+ *   control, and it has no way to turn thinking off.
  *
  * `efforts`: the accepted effort values as published, an off value such as
  * `none` included. Never present on `toggle`. A `none` effort turns thinking
@@ -349,7 +359,10 @@ export type ModelFact =
  * - A reason wins over a value the listing also carries.
  *
  * Only pricing keeps its stored value on a bare omission: a parser that
- * misses one row must not null a good price. `factSources.<fact>.path:
+ * misses one row must not null a good price. A "-" or blank cached-input
+ * cell is a stated absence of that lever, stored as
+ * `factSources.cacheRead` with `path: 'not-offered'`. It does not clear
+ * the rest of the card and it is not a price of zero. `factSources.<fact>.path:
  * 'silent'` is not this. It is stored provenance for a null whose page was
  * read, and the fact is written like any omission. `deprecated` is not a
  * fact here: a stored `deprecatedAt` cannot tell "upstream flagged it"

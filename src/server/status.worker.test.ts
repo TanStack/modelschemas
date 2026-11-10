@@ -379,12 +379,14 @@ describe('getServiceStatus', () => {
       needed: 0,
       silent: [...FACT_KEYS],
     })
-    // full: 10 of 10. thin: contextWindow, capabilities of 9. borrowed: 0 of 7.
+    // full: 10 of 10. thin: contextWindow and capabilities of 7 (no
+    // OpenAI-compat route, so requestMap and replay are not scored).
+    // borrowed: 0 of 6.
     expect(mixed).toEqual({
-      score: 12 / 26,
+      score: 12 / 23,
       chat: 3,
       filled: 12,
-      needed: 26,
+      needed: 23,
       silent: ['cacheRead'],
     })
 
@@ -399,7 +401,7 @@ describe('getServiceStatus', () => {
     }
   })
 
-  const KEY = 'status:completeness:v1'
+  const KEY = 'status:completeness:v2'
   const scoreOf = async (db: ReturnType<typeof getDb>, id: string) => {
     const status = await getServiceStatus(db, NOW)
     return {
@@ -417,7 +419,7 @@ describe('getServiceStatus', () => {
       computedAt: NOW,
       score: 0,
       chat: 1,
-      needed: 8,
+      needed: 7,
     })
 
     // A chat row the record never scored: no number over a different set.
@@ -567,7 +569,7 @@ it('scores only the exact raw model covered by a scoped silence entry', async ()
     (entry) => entry.id === 'scoped-status',
   )?.completeness
   expect(result?.filled).toBe(0)
-  expect(result?.needed).toBe(15)
+  expect(result?.needed).toBe(13)
   const served = await listModelsCatalog(db, {
     provider: 'scoped-status',
     pricing: true,

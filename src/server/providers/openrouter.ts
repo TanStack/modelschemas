@@ -17,6 +17,7 @@ import {
   openRouterGatewayEfforts,
   openRouterGatewayToggle,
   openRouterGatewayEffortWire,
+  openRouterReasoningContentReplay,
   OPENROUTER_REASONING_URL,
 } from './openrouter-reasoning.ts'
 import { openRouterReasoning } from './reasoning-config.ts'
@@ -333,11 +334,12 @@ async function listModels(
     )
       ? await cachedDocs(
           kv,
-          `${OPENROUTER_REASONING_URL}#${needsToggle ? 'gateway-efforts-and-toggle-wire-v1' : 'gateway-efforts-wire-v1'}`,
+          `${OPENROUTER_REASONING_URL}#${needsToggle ? 'gateway-efforts-and-toggle-wire-v2' : 'gateway-efforts-wire-v2'}`,
           async () => {
             const text = await fetchText(OPENROUTER_REASONING_URL, {
               signal: AbortSignal.timeout(30_000),
             })
+            openRouterReasoningContentReplay(text)
             return {
               efforts: openRouterGatewayEfforts(text),
               effortWire: openRouterGatewayEffortWire(text),
@@ -347,6 +349,25 @@ async function listModels(
           },
         )
       : null
+  const replay = gateway
+    ? { hash: gateway.hash }
+    : await cachedDocs(
+        kv,
+        `${OPENROUTER_REASONING_URL}#reasoning-content-replay-v1`,
+        async () => {
+          const text = await fetchText(OPENROUTER_REASONING_URL, {
+            signal: AbortSignal.timeout(30_000),
+          })
+          openRouterReasoningContentReplay(text)
+          return { hash: await sha256Text(text) }
+        },
+      )
+  const replaySource = {
+    derivation: 'docs-derived' as const,
+    sourceUrl: OPENROUTER_REASONING_URL,
+    sourceHash: replay.hash,
+    path: 'reasoning_content alias; reasoning_details replay for every supported reasoning model',
+  }
   const ownThinking = (m: NonNullable<OpenRouterModelList['data']>[number]) => {
     const reason = openRouterReasoning(
       m,
@@ -381,60 +402,86 @@ async function listModels(
           }
         : undefined,
       capabilities: openrouterCapabilities(m),
-      requestMap: null,
       reasoning: openRouterReasoning(
         m,
         gateway?.efforts,
         gateway?.toggle !== undefined,
       ),
-      ...(ownThinking(m)
-        ? {
-            requestMap: {
+      requestMap:
+        openrouterModelActivity(m.architecture?.output_modalities) === 'chat'
+          ? {
               thinking: ownThinking(m),
               maxTokensField: null,
               developerRole: null,
-              replayReasoningContent: null,
+              // The guide states replay for reasoning models only.
+              replayReasoningContent: openRouterReasoning(
+                m,
+                gateway?.efforts,
+                gateway?.toggle !== undefined,
+              )
+                ? (true as const)
+                : null,
               store: null,
               strictTools: null,
               sessionAffinity: null,
               cacheControl: null,
               toolStream: null,
               reasoningEffort: null,
-            },
-          }
-        : {}),
-      ...(gateway &&
-      (m.reasoning?.supported_efforts === null || ownThinking(m) !== null) &&
-      typeof m.reasoning?.mandatory === 'boolean'
+            }
+          : null,
+      ...(openrouterModelActivity(m.architecture?.output_modalities) ===
+        'chat' ||
+      (gateway &&
+        (m.reasoning?.supported_efforts === null || ownThinking(m) !== null) &&
+        typeof m.reasoning?.mandatory === 'boolean')
         ? {
             factSources: {
-              ...(ownThinking(m)
+              ...(gateway &&
+              (m.reasoning?.supported_efforts === null ||
+                ownThinking(m) !== null) &&
+              typeof m.reasoning?.mandatory === 'boolean'
                 ? {
-                    requestMapFields: {
-                      thinking: {
-                        derivation: 'docs-derived' as const,
-                        sourceUrl: OPENROUTER_REASONING_URL,
-                        sourceHash: gateway.hash,
-                        path: 'native accepted effort values or nonmandatory toggle; normative universal normalized reasoning effort/enabled fields',
-                      },
+                    reasoning: {
+                      derivation: 'docs-derived' as const,
+                      sourceUrl: OPENROUTER_REASONING_URL,
+                      sourceHash: gateway.hash,
+                      path:
+                        m.reasoning.supported_efforts === null
+                          ? 'supported_efforts:null; normative gateway effort bullets; listing mandatory'
+                          : openRouterReasoning(
+                                m,
+                                gateway.efforts,
+                                gateway.toggle !== undefined,
+                              )?.mode === 'toggle'
+                            ? 'native mandatory:false; Messages API normalized reasoning.enabled accepted on every reasoning model; explicit disables prose'
+                            : 'native per-model accepted efforts and mandatory metadata; universal normalized reasoning.effort field',
                     },
                   }
                 : {}),
-              reasoning: {
-                derivation: 'docs-derived' as const,
-                sourceUrl: OPENROUTER_REASONING_URL,
-                sourceHash: gateway.hash,
-                path:
-                  m.reasoning.supported_efforts === null
-                    ? 'supported_efforts:null; normative gateway effort bullets; listing mandatory'
-                    : openRouterReasoning(
-                          m,
-                          gateway.efforts,
-                          gateway.toggle !== undefined,
-                        )?.mode === 'toggle'
-                      ? 'native mandatory:false; Messages API normalized reasoning.enabled accepted on every reasoning model; explicit disables prose'
-                      : 'native per-model accepted efforts and mandatory metadata; universal normalized reasoning.effort field',
-              },
+              ...(openrouterModelActivity(m.architecture?.output_modalities) ===
+              'chat'
+                ? {
+                    requestMapFields: {
+                      ...(ownThinking(m) && gateway
+                        ? {
+                            thinking: {
+                              derivation: 'docs-derived' as const,
+                              sourceUrl: OPENROUTER_REASONING_URL,
+                              sourceHash: gateway.hash,
+                              path: 'native accepted effort values or nonmandatory toggle; normative universal normalized reasoning effort/enabled fields',
+                            },
+                          }
+                        : {}),
+                      ...(openRouterReasoning(
+                        m,
+                        gateway?.efforts,
+                        gateway?.toggle !== undefined,
+                      )
+                        ? { replayReasoningContent: replaySource }
+                        : {}),
+                    },
+                  }
+                : {}),
             },
           }
         : {}),

@@ -302,9 +302,12 @@ const STATED_OFF = /'([^']+)' disables thinking|\b[Uu]se '([^']+)' to disable\b/
  *
  * - A level enum is `effort`. `mandatory` is false when the description
  *   says a level turns thinking off ("'low' disables thinking", "Use 'none'
- *   to disable"), or when `reasoning_effort` accepts `none`. Otherwise it is
- *   unstated. On any other field a `none` that is the default is "unset",
- *   not a level ("leave as None for default behavior"): it is left out.
+ *   to disable"), or when `reasoning_effort` accepts `none`. On any other
+ *   field a `none` that is the default is "unset", not a level ("leave as
+ *   None for default behavior"): it is left out, and `mandatory` stays
+ *   unstated. Otherwise the enum is this model's own exhaustive list and
+ *   its only control, so `mandatory` is true. Another control
+ *   (`thinking_budget`, `enable_thinking`) leaves it unstated.
  * - An integer `thinking_budget` is `budget`; "0 to disable thinking" in its
  *   description says it can be turned off.
  * - A boolean `enable_thinking` and nothing else is a `toggle` with an off
@@ -339,7 +342,23 @@ function reasoningField(
       (value) => !(value === unset && value.toLowerCase() === 'none'),
     )
     if (efforts.length === 0) return null
-    return { name, reasoning: { mode: 'effort', mandatory: null, efforts } }
+    const droppedUnset = efforts.length !== listed.length
+    const otherControl =
+      'thinking_budget' in properties || 'enable_thinking' in properties
+    const listsOff = efforts.some((value) =>
+      ['none', 'disabled', 'off', 'no_think'].includes(value.toLowerCase()),
+    )
+    return {
+      name,
+      reasoning: {
+        mode: 'effort',
+        // An off value still in the list, or a `none` read as unset, is
+        // not "no off value". Another control on the same schema is not
+        // this list's statement either.
+        mandatory: droppedUnset || otherControl || listsOff ? null : true,
+        efforts,
+      },
+    }
   }
 
   const budget = properties.thinking_budget

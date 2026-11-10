@@ -258,7 +258,7 @@ Reasoning.effort supports: minimal, low, medium, and high.
       ],
       reasoning: {
         mode: 'effort',
-        mandatory: null,
+        mandatory: true,
         efforts: ['minimal', 'low', 'medium', 'high'],
       },
       // Docs names map to Responses tool types; client-side ones drop.
@@ -306,7 +306,7 @@ Reasoning.effort supports: minimal, low, medium, and high.
       ),
     ).toEqual({
       mode: 'effort',
-      mandatory: null,
+      mandatory: true,
       efforts: ['medium', 'high', 'xhigh'],
     })
     expect(

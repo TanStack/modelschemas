@@ -30,10 +30,11 @@ import { sourceSilentLedger } from '#/server/source-silent.ts'
  */
 export interface Completeness {
   /**
-   * 0 to 1. Null when the provider has no live chat models and so nothing
-   * to score (the CLI prints 0 there so its loop keeps going), and when
+   * 0 to 1. Null when the provider has no live chat models, and when
    * there is no current score: none computed yet, or the provider's chat
-   * models changed since the last poll scored them.
+   * models changed since the last poll scored them. The CLI prints n/a
+   * for a provider that does not serve chat, and 0 when classification
+   * produced no chat rows.
    */
   score: number | null
   /** Live chat models scored. */
@@ -114,7 +115,7 @@ const live = (where = sql`1`) =>
  * Bump the version when the scorer or the `Completeness` shape changes: the
  * old row then reads as no record, and scores are null until the next poll.
  */
-const COMPLETENESS_KEY = 'status:completeness:v1'
+const COMPLETENESS_KEY = 'status:completeness:v2'
 
 /**
  * Completeness of every provider with live chat rows. One query, only the
@@ -138,6 +139,7 @@ async function scoreCompleteness(
       reasoning: models.reasoning,
       requestMap: models.requestMap,
       schemaEndpointId: models.schemaEndpointId,
+      factSources: models.factSources,
     })
     .from(models)
     .where(and(eq(models.activity, 'chat'), isNull(models.deprecatedAt)))
@@ -155,6 +157,7 @@ async function scoreCompleteness(
       reasoning: row.reasoning as ModelRow['reasoning'],
       requestMap: row.requestMap,
       schemaEndpointId: resolveSchemaEndpointId(row),
+      factSources: row.factSources as ModelRow['factSources'],
     })),
     ledger,
   )

@@ -44,11 +44,35 @@ components:
 `
 
 describe('parseMistralChatWire', () => {
+  it('reads a closed assistant schema with no reasoning_content as false', () => {
+    const closed = `${SPEC}
+    AssistantMessage:
+      additionalProperties: false
+      properties:
+        role:
+          const: assistant
+        content:
+          type: string
+`
+    expect(parseMistralChatWire(closed).replayReasoningContent).toBe(false)
+    const open = closed.replace(
+      'AssistantMessage:\n      additionalProperties: false',
+      'AssistantMessage:\n      additionalProperties: true',
+    )
+    expect(parseMistralChatWire(open).replayReasoningContent).toBeNull()
+    const present = closed.replace(
+      'content:\n          type: string',
+      'content:\n          type: string\n        reasoning_content:\n          type: string',
+    )
+    expect(parseMistralChatWire(present).replayReasoningContent).toBeNull()
+  })
+
   it('reads max_tokens, no developer role, and reasoning_effort', () => {
     expect(parseMistralChatWire(SPEC)).toEqual({
       maxTokensField: 'max_tokens',
       developerRole: false,
       reasoningEffort: true,
+      replayReasoningContent: null,
     })
     expect(() => parseMistralChatWire('components: {}')).toThrow(
       /ChatCompletionRequest missing/,

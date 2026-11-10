@@ -82,6 +82,7 @@ it('syncs native Ant Ling schema without spreading model-specific reasoning acro
       modalities: row.modalities as ModelRow['modalities'],
       pricing: row.pricing as ModelRow['pricing'],
       reasoning: row.reasoning as ModelRow['reasoning'],
+      factSources: row.factSources as ModelRow['factSources'],
     })),
     parseLedger(ledgerMarkdown),
   ).providers[0]!

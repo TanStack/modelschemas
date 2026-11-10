@@ -158,6 +158,8 @@ export interface DocsPricing {
   expiresAt?: string
   /** Set instead of `rates` when the model is billed per unit. */
   unit?: UnitCardSpec
+  /** A Cached input cell was "-" or blank. Not a rate. */
+  cacheReadNotOffered?: true
 }
 
 /** Unit a price is quoted in → the lever it bills, and units per quote. */
@@ -220,13 +222,17 @@ function parseUnitSection(block: string): UnitCardSpec | null {
  * (issue #111). `gpt-5-search-api` has no model page. Embeddings,
  * moderation, and other categories are not read here. The Fast table
  * further down is a different tier, so it is not part of this card.
- * A dash cached-input cell is an unpublished lever, not $0.
+ * A dash or blank cached-input cell is a stated absence, not $0.
  */
 export function parseOpenAiSearchPricing(
   markdown: string,
-): Map<string, Record<string, number>> {
+): Map<string, Record<string, number>> & { cacheReadNotOffered: Set<string> } {
   const start = markdown.indexOf('Specialized models')
-  const out = new Map<string, Record<string, number>>()
+  const out = new Map<string, Record<string, number>>() as Map<
+    string,
+    Record<string, number>
+  > & { cacheReadNotOffered: Set<string> }
+  out.cacheReadNotOffered = new Set()
   if (start < 0) return out
   const rest = markdown.slice(start)
   const fastAt = rest.search(/\nFast\b/)
@@ -246,10 +252,12 @@ export function parseOpenAiSearchPricing(
       input_tokens: inputUsd / 1e6,
       output_tokens: outputUsd / 1e6,
     }
-    if (cached !== undefined && cached !== '-' && cached !== '') {
+    if (cached !== undefined && cached !== '-' && cached.trim() !== '') {
       const cachedUsd = usd(cached)
       if (cachedUsd === null) continue
       rates.cache_read_tokens = cachedUsd / 1e6
+    } else if (cached === '-' || cached?.trim() === '') {
+      out.cacheReadNotOffered.add(model)
     }
     out.set(model, rates)
   }
@@ -263,6 +271,7 @@ export function parseOpenAiSearchPricing(
 export function parseModelPricing(markdown: string): DocsPricing | null {
   const pricing = markdownSection(markdown, 'Pricing')
   const rates: Record<string, number> = {}
+  let cacheReadNotOffered = false
   const blocks = pricing.split('\n### ').slice(1)
   // o3.md repeats `### Text tokens`: the first table is standard, the second
   // is the half-price batch/flex table with no heading of its own. A later
@@ -286,9 +295,18 @@ export function parseModelPricing(markdown: string): DocsPricing | null {
     for (const [metric = '', price, unit] of markdownTableRows(block)) {
       if (metric === 'Metric') continue
       const lever = levers[metric]
+      const cell = price?.trim() ?? ''
+      if (
+        lever === 'cache_read_tokens' &&
+        (cell === '-' || cell === '—' || cell === '–' || cell === '')
+      ) {
+        cacheReadNotOffered = true
+        continue
+      }
       const rate = usd(price)
       if (!lever || rate === null || unit !== '1M tokens') return null
       rates[lever] = rate / 1e6
+      if (lever === 'cache_read_tokens') cacheReadNotOffered = false
     }
   }
   if (Object.keys(rates).length === 0) return null
@@ -296,7 +314,11 @@ export function parseModelPricing(markdown: string): DocsPricing | null {
   const bullets = [...pricing.matchAll(/^- (.+)$/gm)].map(
     ([, bullet = '']) => bullet,
   )
-  const out: DocsPricing = { rates, tiers: [] }
+  const out: DocsPricing = {
+    rates,
+    tiers: [],
+    ...(cacheReadNotOffered ? { cacheReadNotOffered: true as const } : {}),
+  }
 
   // Rate-adding bullets first: a tier re-quotes whatever levers exist.
   for (const bullet of bullets) {
@@ -480,9 +502,9 @@ const EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 /**
  * Effort levels from the page's prose: "Reasoning.effort supports: none
  * (default), low, …" or "defaults to (and only supports) `reasoning.effort:
- * high`". Reasoning is optional only when `none` is accepted; "only
- * supports" one other level states it cannot be turned off. Without a
- * native control declaration, its mode stays unknown; capability is separate.
+ * high`". Reasoning is optional only when `none` is accepted. The page's
+ * own exhaustive list with no off value means thinking cannot be turned
+ * off. Without a list, its mode stays unknown; capability is separate.
  */
 export function parseReasoningEffort(markdown: string): ModelReasoning | null {
   const prose = markdown.replace(/```[\s\S]*?```/g, '')
@@ -513,16 +535,16 @@ export function parseReasoningEffort(markdown: string): ModelReasoning | null {
     })
     return explicitControl ? { mode: 'effort', mandatory: null } : null
   }
+  // The page's own list is exhaustive and names no off value, so thinking
+  // cannot be turned off. Prose that denies that ("not always on") leaves
+  // it unstated. A shared family guide does not come through here.
+  const denied =
+    /(?:reasoning|thinking)\s+(?:is\s+)?not\s+(?:always on|mandatory|required)/i.test(
+      prose,
+    ) || /can be (?:disabled|turned off)/i.test(prose)
   return {
     mode: 'effort',
-    mandatory: efforts.includes('none')
-      ? false
-      : only !== undefined ||
-          /(?:reasoning|thinking)\s+(?:is\s+)?(?:cannot be disabled|always on|cannot be turned off)/i.test(
-            prose,
-          )
-        ? true
-        : null,
+    mandatory: efforts.includes('none') ? false : denied ? null : true,
     ...(efforts.length > 0 ? { efforts } : {}),
   }
 }
@@ -625,6 +647,7 @@ export async function openaiModelFacts(
       assertParsed(parsed, 'openai pricing page search rows')
       return {
         rates: Object.fromEntries(parsed),
+        cacheReadNotOffered: [...parsed.cacheReadNotOffered],
         hash: await sha256Text(markdown),
         extractedAt: new Date().toISOString(),
       }
@@ -688,7 +711,20 @@ export async function openaiModelFacts(
     }
     const facts: ModelFacts = {
       ...withPricing,
-      factSources: tagDocsFacts(withPricing, url, loaded.page.hash),
+      factSources: {
+        ...tagDocsFacts(withPricing, url, loaded.page.hash),
+        ...(loaded.page.pricing?.cacheReadNotOffered &&
+        loaded.page.pricing.rates.cache_read_tokens === undefined
+          ? {
+              cacheRead: {
+                derivation: 'docs-derived' as const,
+                sourceUrl: url,
+                sourceHash: loaded.page.hash,
+                path: 'not-offered',
+              },
+            }
+          : {}),
+      },
     }
     const priced = new Set(loaded.page.pricedIds)
     for (const id of loaded.page.ids) {
@@ -914,6 +950,17 @@ export async function openaiModelFacts(
       factSources: {
         ...facts.factSources,
         ...tagDocsFacts({ pricing }, OPENAI_PRICING_URL, searchDoc.hash),
+        ...(searchDoc.cacheReadNotOffered.includes(rawId) &&
+        rates.cache_read_tokens === undefined
+          ? {
+              cacheRead: {
+                derivation: 'docs-derived' as const,
+                sourceUrl: OPENAI_PRICING_URL,
+                sourceHash: searchDoc.hash,
+                path: 'not-offered',
+              },
+            }
+          : {}),
       },
     }
   }

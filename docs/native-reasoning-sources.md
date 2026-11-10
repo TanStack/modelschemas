@@ -14,9 +14,10 @@ The requested Seed 2.1 Turbo and Laguna S 2.1 examples already publish the
 reasoning metadata is only a mandatory flag. Preserve their capability independent
 of whether a valid reasoning configuration can be constructed. A reasoning
 metadata object also contributes this capability; it never fabricates a mode.
-Replay is not inferred from upstream models or output fields. OpenRouter's own
-reasoning-details instructions use a different preserved structure, so this patch
-does not stamp reasoning_content replay on its rows.
+Replay is not inferred from upstream models or output fields. The reasoning
+tokens guide states `reasoning_content` as an alias of `reasoning`, and
+`reasoning_details` replay, for every supported reasoning model. That
+statement covers every chat model on the route. Evidence is the guide URL.
 
 ## OpenAI
 
@@ -53,11 +54,13 @@ Individual model-page fetch and parse failures now error instead of returning
 unknown facts. A model's own page takes precedence over another alias page's
 snapshot reference. Realtime pages explicitly declaring configurable reasoning
 effort retain effort mode with unknown levels and mandatory status.
-A level list without `none` does not by itself prove mandatory thinking.
-`mandatory` is true when the page says the model only supports one level other
-than `none`, when cannot-disable or always-on prose says so, or when the GPT-5
-family list has no `none` and the GPT-5.1 guide says that list's first level
-still spends reasoning tokens. Otherwise it stays null. Reasoning-token
+A model's own exhaustive effort list with no off value means `mandatory` is
+true: the page names the levels and none of them turn thinking off. A shared
+family list still states nothing by itself. `mandatory` is also true when the
+page says the model only supports one level other than `none`, when
+cannot-disable or always-on prose says so, or when the GPT-5 family list has
+no `none` and the GPT-5.1 guide says that list's first level still spends
+reasoning tokens. A page that names no levels stays null. Reasoning-token
 capability without a control declaration does not justify an invented effort
 mode or mandatory=true. Such configurations remain null while capability
 remains independently sourced. Pages that do not name effort levels are not

@@ -21,6 +21,12 @@ export interface MistralChatWire {
   maxTokensField: 'max_completion_tokens' | 'max_tokens' | null
   developerRole: boolean | null
   reasoningEffort: boolean | null
+  /**
+   * False when the assistant message schema omits `reasoning_content` and
+   * sets `additionalProperties: false`. Null when that schema is absent or
+   * open.
+   */
+  replayReasoningContent: boolean | null
   hash: string
 }
 
@@ -79,7 +85,25 @@ export function parseMistralChatWire(
     : chat?.additionalProperties === false
       ? false
       : null
-  return { maxTokensField, developerRole, reasoningEffort }
+  const assistant = isRecord(schemas) ? schemas.AssistantMessage : undefined
+  const assistantProperties =
+    isRecord(assistant) && isRecord(assistant.properties)
+      ? assistant.properties
+      : null
+  const closedAssistant =
+    isRecord(assistant) && assistant.additionalProperties === false
+  const replayReasoningContent =
+    assistantProperties && closedAssistant
+      ? 'reasoning_content' in assistantProperties
+        ? null
+        : false
+      : null
+  return {
+    maxTokensField,
+    developerRole,
+    reasoningEffort,
+    replayReasoningContent,
+  }
 }
 
 export async function mistralChatWire(
@@ -138,7 +162,7 @@ export function mistralRequestMap(
     thinking: mistralThinking(reasoning),
     maxTokensField: wire.maxTokensField,
     developerRole: wire.developerRole,
-    replayReasoningContent: null,
+    replayReasoningContent: wire.replayReasoningContent,
     store: null,
     strictTools: null,
     sessionAffinity: null,

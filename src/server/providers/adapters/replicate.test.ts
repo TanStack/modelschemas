@@ -427,7 +427,7 @@ describe('replicate chat facts from a model schema', () => {
     })
   })
 
-  it('reads off from the description, never from the absence of none', () => {
+  it('reads off from the description, and an own list with no off as mandatory', () => {
     // `effort` low…max: "'low' disables thinking for the fastest, cheapest
     // responses."
     const claude = replicateChatFacts(model('anthropic/claude-sonnet-5'))
@@ -447,20 +447,21 @@ describe('replicate chat facts from a model schema', () => {
         description
       return replicateChatFacts(row)?.reasoning
     }
-    // Reworded, or naming a level the enum does not list: unstated.
-    expect(effort('How much thinking Claude does.')?.mandatory).toBeNull()
-    expect(effort("'low' keeps thinking short.")?.mandatory).toBeNull()
-    expect(effort("'none' disables thinking.")?.mandatory).toBeNull()
+    // Reworded, or naming a level the enum does not list: the own list has
+    // no off value, so thinking cannot be turned off.
+    expect(effort('How much thinking Claude does.')?.mandatory).toBe(true)
+    expect(effort("'low' keeps thinking short.")?.mandatory).toBe(true)
+    expect(effort("'none' disables thinking.")?.mandatory).toBe(true)
     expect(effort("Use 'low' to disable.")?.mandatory).toBe(false)
 
-    // `reasoning_effort` without `none`: levels, off unstated.
+    // `reasoning_effort` without `none`: this model's only control.
     const gpt = model('openai/gpt-5.4')
     const schemas = gpt.latest_version?.openapi_schema?.components
       ?.schemas as Record<string, { enum?: Array<string> }>
     schemas.reasoning_effort!.enum = ['low', 'medium', 'high']
     expect(replicateChatFacts(gpt)?.reasoning).toEqual({
       mode: 'effort',
-      mandatory: null,
+      mandatory: true,
       efforts: ['low', 'medium', 'high'],
     })
 

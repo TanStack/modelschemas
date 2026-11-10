@@ -58,8 +58,8 @@ it('reads actual OpenAI multiline, Codex and GPT-OSS effort lists without negati
   ])
   expect(parse('gpt-oss-120b')?.efforts).toEqual(['low', 'medium', 'high'])
   expect(parse('gpt-6-luna')?.mandatory).toBe(false)
-  expect(parse('gpt-5.2-codex')?.mandatory).toBeNull()
-  expect(parse('gpt-oss-120b')?.mandatory).toBeNull()
+  expect(parse('gpt-5.2-codex')?.mandatory).toBe(true)
+  expect(parse('gpt-oss-120b')?.mandatory).toBe(true)
   expect(
     parseReasoningEffort(
       'Reasoning.effort supports: low, high. Thinking cannot be disabled.',

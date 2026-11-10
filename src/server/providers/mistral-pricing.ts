@@ -56,6 +56,8 @@ function isMissingDocsPage(error: unknown): boolean {
 export interface MistralTokenRates {
   kind: 'tokens'
   rates: Record<string, number>
+  /** The cached-input cell was "-" or blank. Not a rate. */
+  cacheReadNotOffered?: true
 }
 
 /** One billed quantity. Cached meters default to 0; the primary does not. */
@@ -208,7 +210,21 @@ export function parseMistralPricing(
         const rates: Record<string, number> = { input_tokens: input }
         if (cached !== undefined) rates.cache_read_tokens = cached
         if (output !== undefined) rates.output_tokens = output
-        out.set(slug, { kind: 'tokens', rates })
+        const cachedCell = text[2] ?? ''
+        const cacheReadNotOffered =
+          cached === undefined &&
+          text.length >= 4 &&
+          (cachedCell === '-' ||
+            cachedCell === '—' ||
+            cachedCell === '–' ||
+            cachedCell === '')
+        out.set(slug, {
+          kind: 'tokens',
+          rates,
+          ...(cacheReadNotOffered
+            ? { cacheReadNotOffered: true as const }
+            : {}),
+        })
         continue
       }
       const meters = unitMeters(
@@ -1441,6 +1457,19 @@ export async function mistralModelPricing(
           tableRow ? table.hash : pageRow?.hash,
         )
       : {}
+    const cacheReadAbsent =
+      tableRow?.kind === 'tokens' &&
+      tableRow.cacheReadNotOffered === true &&
+      tableRow.rates.cache_read_tokens === undefined
+        ? {
+            cacheRead: {
+              derivation: 'docs-derived' as const,
+              sourceUrl: MISTRAL_PRICING_URL,
+              sourceHash: table.hash,
+              path: 'not-offered',
+            },
+          }
+        : {}
     const features = featured.get(rawId)
     const builtIn = mistralConversationTools(features?.value, webSearch.tools)
     const serverTools = [
@@ -1474,6 +1503,7 @@ export async function mistralModelPricing(
       : {}
     const factSources = {
       ...pricingFacts,
+      ...cacheReadAbsent,
       ...toolFacts,
       ...modalityFacts,
       ...maxFacts,
