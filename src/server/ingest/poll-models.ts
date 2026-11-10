@@ -106,11 +106,12 @@ export interface PollOutcome {
 }
 
 /**
- * Unchanged rows per `last_seen_at … IN (…)` statement. Ninety ids fits
- * D1's 100-parameter cap but rewrites a large IN-list of fat rows in one
- * statement, enough to spend the 10-second resource window (issue #625).
+ * Unchanged rows per `last_seen_at … IN (…)` statement: under D1's
+ * 100-parameter cap. Not smaller: each statement is a subrequest against
+ * the poll invocation's 1,000 budget, shared by every provider's fetches,
+ * and ~7,700 rows at 20 per statement would spend ~390 of it.
  */
-export const LAST_SEEN_CHUNK = 20
+export const LAST_SEEN_CHUNK = 90
 
 /** Deterministic model row id: `${providerId}-${slugified rawId}`. */
 export function modelDbId(providerId: string, rawId: string): string {

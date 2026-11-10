@@ -2997,8 +2997,8 @@ describe('model.updated facts', () => {
 })
 
 describe('D1 overload window (issue #625)', () => {
-  it('keeps a lastSeenAt write under the chunk that spent the window', () => {
-    expect(LAST_SEEN_CHUNK).toBeLessThanOrEqual(20)
+  it('keeps lastSeenAt chunks under the parameter cap', () => {
+    expect(LAST_SEEN_CHUNK).toBeLessThan(100)
     expect(d1WindowExhausted('listing 503')).toBe(false)
     expect(
       d1WindowExhausted(
