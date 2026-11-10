@@ -285,6 +285,11 @@ function isStreamType(value: string): boolean {
   return isEventStream(value) || mediaTypeBase(value) === 'application/x-ndjson'
 }
 
+/** AWS binary event stream. Not SSE, so it is not rewritten to `text/event-stream`. */
+function isAwsEventStream(value: string): boolean {
+  return mediaTypeBase(value) === 'application/vnd.amazon.eventstream'
+}
+
 function isMultipart(value: string): boolean {
   return mediaTypeBase(value) === 'multipart/form-data'
 }
@@ -542,7 +547,9 @@ function bindSuccessContent(
   }
   if (!first) return undefined
   const stream = Object.entries(first).find(
-    ([type, media]) => isStreamType(type) && media.schema !== undefined,
+    ([type, media]) =>
+      (isStreamType(type) || isAwsEventStream(type)) &&
+      media.schema !== undefined,
   )
   return { content: first, ...(stream ? { stream: stream[1] } : {}) }
 }

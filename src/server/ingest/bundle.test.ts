@@ -175,6 +175,47 @@ describe('extractEndpointSchemas', () => {
     expect(result.streamOutput?.$defs).toBeUndefined()
   })
 
+  it('stores an AWS event stream as the output schema', () => {
+    const result = extractEndpointSchemas(
+      {
+        openapi: '3.1.0',
+        paths: {
+          '/model/{modelId}/converse-stream': {
+            post: {
+              responses: {
+                '200': {
+                  content: {
+                    'application/vnd.amazon.eventstream': {
+                      schema: {
+                        type: 'object',
+                        minProperties: 1,
+                        maxProperties: 1,
+                        properties: {
+                          messageStart: { type: 'object' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/model/{modelId}/converse-stream',
+    )
+    expect(result.outputContentTypes).toEqual([
+      'application/vnd.amazon.eventstream',
+    ])
+    expect(result.streamOutput).toBeUndefined()
+    expect(result.output).toEqual({
+      type: 'object',
+      minProperties: 1,
+      maxProperties: 1,
+      properties: { messageStart: { type: 'object' } },
+    })
+  })
+
   it('does not treat a boolean stream field as an event stream', () => {
     const spec = structuredClone(fixtureSpec())
     const create = spec.components?.schemas?.CreateMessage as

@@ -1,17 +1,15 @@
 /**
  * Amazon Bedrock — first-party only (issue #153). Models come from the user
- * guide's model cards; the Converse schema is generated from the AWS SDK's
- * Bedrock Runtime service model. Neither needs AWS credentials
+ * guide's model cards; the runtime schema (Converse, ConverseStream,
+ * InvokeModel, InvokeModelWithResponseStream) is generated from the AWS
+ * SDK's Bedrock Runtime service model. Neither needs AWS credentials
  * (ListFoundationModels does), and no aggregator is read.
  */
 import type { Activity } from '#/db/schema.ts'
 
+import { BEDROCK_CARDS_URL, bedrockCardListing } from '../bedrock-cards.ts'
 import {
-  BEDROCK_CARDS_URL,
-  BEDROCK_CONVERSE_PATH,
-  bedrockCardListing,
-} from '../bedrock-cards.ts'
-import {
+  BEDROCK_RUNTIME_PATHS,
   BEDROCK_SDK_MODEL_URL,
   bedrockConverseSpec,
 } from '../bedrock-sdk-spec.ts'
@@ -97,5 +95,7 @@ export const provider: ProviderConfig = {
   fetchSpec,
   listModels,
   classify: (path): Activity | null =>
-    path === BEDROCK_CONVERSE_PATH ? 'chat' : null,
+    (BEDROCK_RUNTIME_PATHS as ReadonlyArray<string>).includes(path)
+      ? 'chat'
+      : null,
 }
