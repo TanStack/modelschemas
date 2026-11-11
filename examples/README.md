@@ -2,7 +2,7 @@
 
 Three small [TanStack Start](https://tanstack.com/start) apps showing the
 modelschemas packages in real use. Each links to the workspace packages by
-`workspace:*` reference — run `bun install` at the repo root first.
+`workspace:*` reference — run `pnpm install` at the repo root first.
 
 | Example                                | Shows                                                                                                                                   | Port |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---- |
@@ -11,9 +11,9 @@ modelschemas packages in real use. Each links to the workspace packages by
 | [video-composer](./video-composer)     | `@modelschemas/client` — video request builder whose model/aspect-ratio/duration pickers only offer values the schema allows            | 3203 |
 
 ```bash
-bun install                      # repo root — links workspace packages
+pnpm install                      # repo root — links workspace packages
 cd examples/schema-studio        # or image-dimensions / video-composer
-bun run dev
+pnpm run dev
 ```
 
 All three fetch from the live service at `https://modelschemas.com` by
@@ -21,7 +21,7 @@ default. Point them at another deployment (e.g. a local dev server with
 freshly synced providers) with:
 
 ```bash
-MODELSCHEMAS_URL=http://localhost:3100 bun run dev
+MODELSCHEMAS_URL=http://localhost:3100 pnpm run dev
 ```
 
 API calls happen server-side (TanStack Start server functions, or the
@@ -29,11 +29,11 @@ API calls happen server-side (TanStack Start server functions, or the
 
 ## Deploying
 
-Every example ships with a Cloudflare Workers setup: `bun run deploy` inside
+Every example ships with a Cloudflare Workers setup: `pnpm run deploy` inside
 an example builds it and deploys it to your own account, running at the root
 of your workers.dev subdomain (reading from the live modelschemas API by
 default). The `modelschemas` Wrangler environment
-(`CLOUDFLARE_ENV=modelschemas bun run deploy`) is the canonical deployment,
+(`CLOUDFLARE_ENV=modelschemas pnpm run deploy`) is the canonical deployment,
 which mounts each app at `modelschemas.com/examples/<name>/` via a zone
 route — only deployable by maintainers, since it targets the
 modelschemas.com zone.

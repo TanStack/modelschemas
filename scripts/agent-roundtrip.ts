@@ -2,7 +2,7 @@
 // acceptance): discovery → POST /agent/register (autonomous, dynamic host,
 // inline Ed25519 keys) → POST /capability/execute round-tripping getSchema.
 //
-//   bun scripts/agent-roundtrip.ts [baseUrl]
+//   pnpm run agent-roundtrip [baseUrl]
 //
 // Exits non-zero on any failure. Also used as a reference client until the
 // real CLI lands (task 7.5).

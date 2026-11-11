@@ -1,5 +1,5 @@
 // Seeds the providers table. Local D1 by default; pass --remote to target
-// production: `bun run seed` / `bun run seed -- --remote`.
+// production: `pnpm run seed` / `pnpm run seed -- --remote`.
 //
 // Goes through `wrangler d1 execute` (instead of a drizzle client) so the
 // script works against wrangler's local sqlite state without a node sqlite
@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { packageBin } from './package-bin.ts'
 import { providerSeeds, seedFromAdapter } from '../src/db/seed-providers.ts'
 import type { ProviderConfig } from '../src/server/providers/types.ts'
 
@@ -68,8 +69,8 @@ writeFileSync(sqlFile, statements.join('\n\n') + '\n')
 
 const target = process.argv.includes('--remote') ? '--remote' : '--local'
 const result = spawnSync(
-  'bunx',
-  ['wrangler', 'd1', 'execute', 'DB', target, '--file', sqlFile],
+  process.execPath,
+  [packageBin('wrangler'), 'd1', 'execute', 'DB', target, '--file', sqlFile],
   { stdio: 'inherit' },
 )
 

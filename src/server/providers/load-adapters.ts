@@ -9,7 +9,7 @@
  * and `modelsEndpoint` set. `*.test.ts` files are ignored.
  *
  * Vite/vitest transform `import.meta.glob`. Do not import this module
- * from bun scripts (`scripts/seed.ts` scans the adapters directory
+ * from Node scripts (`scripts/seed.ts` scans the adapters directory
  * itself).
  */
 import type { ProviderConfig } from './types.ts'

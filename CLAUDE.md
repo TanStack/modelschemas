@@ -28,42 +28,42 @@ is the live map.
 
 ## Commands
 
-Bun is the package manager; the repo is a bun workspace (`packages/*`).
+pnpm is the package manager (`packages/*`, `examples/*`). Scripts run on Node 24 or newer (`engines.node`).
 
 ```bash
-bun install              # install + link workspace packages
-bun run dev              # local D1 migrate, then dev server on http://localhost:3100 (NOT --bun: bun's ws shim hangs vite)
-bun run test             # vitest, unit + workers projects (NOT --bun: cloudflare pool needs node)
-bun run test src/path/to/file.test.ts       # single test file
-bun --bun run lint       # oxlint --type-aware (no-explicit-any + no-unsafe-* are errors)
-bun run typecheck        # tsc --noEmit (includes packages/*)
-bun --bun run format     # oxfmt + oxlint --fix
-bun --bun run check      # oxfmt --check
-bun --bun run build      # production build (emits dist/server/wrangler.json)
-bun run deploy           # build + wrangler deploy
-bun run npm:pack         # pack public packages to dist/npm (no publish)
+pnpm install              # install + link workspace packages
+pnpm run dev              # local D1 migrate, then dev server on http://localhost:3100
+pnpm run test             # vitest, unit + workers projects
+pnpm run test src/path/to/file.test.ts       # single test file
+pnpm run lint       # oxlint --type-aware (no-explicit-any + no-unsafe-* are errors)
+pnpm run typecheck        # tsc --noEmit (includes packages/*)
+pnpm run format     # oxfmt + oxlint --fix
+pnpm run check      # oxfmt --check
+pnpm run build      # production build (emits dist/server/wrangler.json)
+pnpm run deploy           # build + wrangler deploy
+pnpm run npm:pack         # pack public packages to dist/npm (no publish)
 ```
 
 Database (drizzle-kit generates; wrangler applies):
 
 ```bash
-bun run db:generate          # generate migrations from src/db/schema.ts
-bun run db:migrate           # apply to wrangler's LOCAL D1
-bun run db:migrate:remote    # apply to remote D1
-bun run seed                 # seed the 8 providers (--remote for prod)
+pnpm run db:generate          # generate migrations from src/db/schema.ts
+pnpm run db:migrate           # apply to wrangler's LOCAL D1
+pnpm run db:migrate:remote    # apply to remote D1
+pnpm run seed                 # seed the 8 providers (--remote for prod)
 ```
 
 Generated artifacts (committed; CI fails on drift):
 
 ```bash
-bun run openapi:emit         # src/server/openapi.ts → openapi.json
-bun run generate:client      # → packages/client/src/generated (hey-api)
-bun run check:client         # regenerate + git diff --exit-code (CI step)
-bun scripts/emit-skill.ts    # src/server/skill.ts → skill/modelschemas/SKILL.md
+pnpm run openapi:emit         # src/server/openapi.ts → openapi.json
+pnpm run generate:client      # → packages/client/src/generated (hey-api)
+pnpm run check:client         # regenerate + git diff --exit-code (CI step)
+pnpm run emit-skill    # src/server/skill.ts → skill/modelschemas/SKILL.md
 ```
 
 A PR that touches `packages/*` (including the generated client) needs a
-changeset (`bunx changeset`), or `bunx changeset --empty` when nothing
+changeset (`pnpm exec changeset`), or `pnpm exec changeset --empty` when nothing
 ships; CI runs `changeset status --since=origin/main` on PRs and fails
 without one. `openapi.json` and `SKILL.md` are oxfmt-ignored (byte-stable
 emitted artifacts). Lefthook pre-commit runs oxfmt/oxlint/typecheck — never
@@ -72,11 +72,11 @@ Workers-binding tests (`*.worker.test.ts`) run in workerd via
 `@cloudflare/vitest-plugin` (config: `vitest.workers.config.ts`,
 migrations auto-applied via TEST_MIGRATIONS).
 
-Local verification flows: `bun scripts/agent-roundtrip.ts` (agent-auth
-register→execute), `bun scripts/client-smoke.ts` (typed client),
-`bun packages/cli <cmd>` (CLI), `bun scripts/rederive.ts <provider>`
+Local verification flows: `pnpm run agent-roundtrip` (agent-auth
+register→execute), `pnpm run client-smoke` (typed client),
+`pnpm run cli -- <cmd>` (CLI), `pnpm run rederive -- <provider>`
 (re-derive schema content hashes from the upstream spec — no service/db;
-shares `classifyAndBundle` with the sync engine), `bun run gap:report --table`
+shares `classifyAndBundle` with the sync engine), `pnpm run gap:report -- --table`
 (per-provider score for the chat facts `@tanstack/ai-models` needs; one
 `/v1/models` request; `docs/source-silent/<provider>.md` lists facts a provider does not
 publish; `--check` exits 1 below `--target`). Admin sync:
@@ -97,7 +97,7 @@ Request path: route files in `src/routes/` (server handlers via
 `server.handlers`) → service functions in `src/server/` → drizzle/D1 +
 KV. Bindings come from `import { env, waitUntil } from 'cloudflare:workers'` —
 typed by the committed, wrangler-generated `worker-configuration.d.ts`
-(`bun run types` regenerates it; rerun after changing wrangler.jsonc or
+(`pnpm run types` regenerates it; rerun after changing wrangler.jsonc or
 .env.local since secret names are typed into Env). Workers runtime types are
 GLOBAL (KVNamespace, D1Database, …) — do not import from
 @cloudflare/workers-types (removed; its types conflict with the generated
@@ -170,8 +170,8 @@ ones).
   Billing, gateway id `AI_GATEWAY_ID`, catalog id `anthropic/claude-sonnet-5.5`
   on the wire — `GATEWAY_MODEL_IDS`); `scripts/compare-fal-extract-models.ts`
   scores candidates through the same code with a stand-in binding, and
-  `bunx tsx scripts/fal-extract-smoke.ts` runs one extract through the REAL
-  binding and gateway (Node, not bun: remote bindings cannot run under bun).
+  `pnpm run fal-extract-smoke --` runs one extract through the REAL
+  binding and gateway (Wrangler remote bindings need Node; oven-sh/bun#39247).
   `models.reasoning` (`{ mode, mandatory, efforts? }`; mode is
   adaptive/budget/effort/toggle). `mandatory` has one meaning: `true` the
   source STATES thinking cannot be turned off, `false` it states it can
@@ -207,7 +207,7 @@ ones).
   `verifiedAt`. The adapter binds that fact only for the exact model and
   route the record names. A record older than 90 days stays served;
   `GET /v1/status` counts it on `staleProbes`. Re-run with
-  `bun scripts/probe.ts <provider> [--write]` (not CI, not the 15-minute
+  `pnpm run probe -- <provider> [--write]` (not CI, not the 15-minute
   poll). The script reads the provider key from the environment or Doppler
   and never prints it.
 - **sameAs links** (issue #199, `src/server/ingest/model-identity.ts`): a
@@ -270,7 +270,7 @@ ones).
   `packages/rate-card` (`@modelschemas/rate-card`: pricing schema +
   evaluator + OpenRouter listing compiler; no Workers deps). Its
   `./evaluator` entry (`evaluateCard`) imports no package. Every public
-  package's npm tarball is `bun run build` output (`dist/` JS + .d.ts);
+  package's npm tarball is `pnpm run build` output (`dist/` JS + .d.ts);
   `npm-pack` lifts `publishConfig` onto the packed manifest. The CLI
   `bin` is `dist/index.js`. MAJOR.MINOR equals
   `RATE_CARD_LANGUAGE` (`card.ts`). The shared estimate cases
@@ -278,14 +278,14 @@ ones).
   tarball and `POST /v1/estimate`.
 - **Path aliases**: `#/*` and `@/*` → `./src/*`; `.ts` import extensions
   allowed. `src/routeTree.gen.ts` is generated by the DEV SERVER (the pinned
-  `tsr` CLI emits an old format) — never edit by hand; boot `bun run dev`
+  `tsr` CLI emits an old format) — never edit by hand; boot `pnpm run dev`
   after adding routes, then typecheck. No tests under `src/routes/` (the
   router treats them as routes; a `.claude` hook blocks them) — test the
   `src/server`/`src/lib` code the route calls.
 - **Env**: `.env.local` holds `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`
   (http://localhost:3100 — JWT audiences are origin-bound), `ADMIN_KEY`,
-  optional provider keys (`bun run secrets:pull` from Doppler `dev`;
-  `DOPPLER_*` is stripped). Prod: `bun run secrets:push` or
+  optional provider keys (`pnpm run secrets:pull` from Doppler `dev`;
+  `DOPPLER_*` is stripped). Prod: `pnpm run secrets:push` or
   `wrangler secret put`. README has the full production-setup + runbook.
 
 API map: `GET /v1` (index) · `/v1/status` · `/v1/providers[/{p}/models]` ·

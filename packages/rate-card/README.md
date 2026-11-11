@@ -10,7 +10,7 @@ throws `RateCardError`. A refusal is an honest unknown.
 > Ships as ES2022 JS with .d.ts; no Cloudflare, Node or DOM imports.
 
 ```bash
-bun add @modelschemas/rate-card
+pnpm add @modelschemas/rate-card
 ```
 
 ## Evaluate a card

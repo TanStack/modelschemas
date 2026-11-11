@@ -66,7 +66,7 @@ const getCatalog = createServerFn({ method: 'GET' })
     const completeness: Record<string, RowCompleteness> = {}
     for (const row of scored.models.slice(0, MAX_ROWS)) {
       if (row.activity !== 'chat') continue
-      // Same scorer as the front page and `bun run gap:report`, one row at a time.
+      // Same scorer as the front page and `pnpm run gap:report`, one row at a time.
       const [report] = buildReport(
         [row as unknown as ModelRow],
         sourceSilentLedger,

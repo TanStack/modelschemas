@@ -15,11 +15,11 @@ a one-off backfill.
 
 ## Each turn
 
-Before starting, check your own checkout has `.env.local` (`bun run
+Before starting, check your own checkout has `.env.local` (`pnpm run
 secrets:pull` creates it where Doppler is set up). Agents copy it: Doppler
 is scoped to a directory, so `secrets:pull` fails in a new worktree.
 
-1. Run `bun run gap:report`. If every provider with chat rows scores 1,
+1. Run `pnpm run gap:report`. If every provider with chat rows scores 1,
    stop the loop and report. Facts in `docs/source-silent/` are already
    left out of the score.
 2. Pick up to three providers. Use the ones passed as arguments. With no
@@ -79,22 +79,22 @@ checkout (for its `.env.local`), and this:
 - **Do not change the DB schema or the API shape.** If a fact has no
   field, stop and say so.
 - **Verify locally.** Other agents run at the same time, each in its own
-  worktree, so do not use `bun run dev`: it binds port 3100. Use the port
+  worktree, so do not use `pnpm run dev`: it binds port 3100. Use the port
   the orchestrator gave you. A new worktree has no `node_modules` and no
   `.env.local`.
 
   ```bash
   cp <orchestrator checkout>/.env.local .env.local
-  bun install && bun run db:migrate && bun run seed
-  bunx vite dev --port <port> &
+  pnpm install && pnpm run db:migrate && pnpm run seed
+  pnpm exec vite dev --port <port> &
   curl -X POST localhost:<port>/v1/admin/sync/<provider> -H "X-Admin-Key: $ADMIN_KEY"
   curl "localhost:<port>/cdn-cgi/handler/scheduled?cron=*/15+*+*+*+*"   # model poll
-  bun run gap:report --base http://localhost:<port> --check --providers <provider>
+  pnpm run gap:report -- --base http://localhost:<port> --check --providers <provider>
   ```
 
   Stop the dev server when done.
 
-  Then `bun run test`, `bun run typecheck`, and `bun --bun run lint`. Add a
+  Then `pnpm run test`, `pnpm run typecheck`, and `pnpm run lint`. Add a
   unit test with a fixture of the source for each new parser or extractor.
 
 - **Open a PR** titled `fill-gaps <provider>: <facts>`. Put the provider's

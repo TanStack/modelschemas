@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { modelschemas } from '@modelschemas/vite'
 
-// Standalone by default (`bun run deploy` → your own workers.dev, app at
+// Standalone by default (`pnpm run deploy` → your own workers.dev, app at
 // "/"); the modelschemas Cloudflare environment mounts this example at
 // modelschemas.com/examples/schema-studio/ via a zone route — see
 // wrangler.jsonc. Router basepath and server-fn base derive from `base`.

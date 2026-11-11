@@ -5,18 +5,18 @@ description: Run the modelschemas gap report and say which chat facts `@tanstack
 
 # Gap report
 
-`bun run gap:report` scores each provider on the chat facts
+`pnpm run gap:report` scores each provider on the chat facts
 `@tanstack/ai-models` needs. It makes one `GET /v1/models` request and
 changes nothing.
 
 ## Run it
 
 ```bash
-bun run gap:report --table                              # every provider, worst first
-bun run gap:report                                      # JSON, for reading with jq
-bun run gap:report --base http://localhost:3100         # a local dev server
-bun run gap:report --check --providers grok,mistral     # exit 1 if either is below 1
-bun run gap:report --check --providers grok --target 0.9
+pnpm run gap:report -- --table                         # every provider, worst first
+pnpm run gap:report                                      # JSON, for reading with jq
+pnpm run gap:report -- --base http://localhost:3100      # a local dev server
+pnpm run gap:report -- --check --providers grok,mistral  # exit 1 if either is below 1
+pnpm run gap:report -- --check --providers grok --target 0.9
 ```
 
 The default base is production (`https://modelschemas.com`). Use `--base`
@@ -25,7 +25,7 @@ with the local server to check work that is not deployed yet.
 One provider's gaps, as `fact: have/need`:
 
 ```bash
-bun run gap:report | jq '.providers[] | select(.provider == "grok")
+pnpm run gap:report | jq '.providers[] | select(.provider == "grok")
   | .silent as $s | {score, silent, gaps: (.facts | with_entries(
       select(.value.have < .value.need and (.key | IN($s[]) | not))))}'
 ```
@@ -61,18 +61,18 @@ The report only measures. When filling what it finds:
 
 ## Compare with models.dev (compare-only)
 
-`bun run compare:models-dev` answers "do we have as much as models.dev for
+`pnpm run compare:models-dev` answers "do we have as much as models.dev for
 the chat models we support?". It reads models.dev only to compare: models.dev
 is never a source (#197), so nothing it shows may be copied into the DB, an
 adapter, a fixture or the ledger. Fill a gap it finds from the provider's own
 source, or ledger it.
 
 ```bash
-bun run compare:models-dev                     # per-provider table, most behind first
-bun run compare:models-dev --provider grok     # models where we are behind or disagree
-bun run compare:models-dev --json              # everything, per model
-bun run compare:models-dev --ours a.json --theirs b.json   # saved inputs, no requests
-bun run compare:models-dev --check --min 0.9   # exit 1 below 90% parity
+pnpm run compare:models-dev                              # per-provider table, most behind first
+pnpm run compare:models-dev -- --provider grok              # models where we are behind or disagree
+pnpm run compare:models-dev -- --json                       # everything, per model
+pnpm run compare:models-dev -- --ours a.json --theirs b.json  # saved inputs, no requests
+pnpm run compare:models-dev -- --check --min 0.9            # exit 1 below 90% parity
 ```
 
 - A fact cell is `behind/they have`: matched pairs where only models.dev has

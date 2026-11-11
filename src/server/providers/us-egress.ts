@@ -19,9 +19,9 @@ export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>
  * docs host serves pages with no tables to the regions its API refuses
  * (#482), and OpenAI's docs host answers 403 from hkg1 (#505). (The `us`
  * jurisdiction would be a hard guarantee, but workerd does not implement
- * it, so `bun run dev` would throw.)
+ * it, so `pnpm run dev` would throw.)
  *
- * Outside the Workers runtime (bun scripts, node unit tests) there is no
+ * Outside the Workers runtime (Node scripts and unit tests) there is no
  * binding and the global fetch runs from the caller's own machine. Inside
  * it, a missing binding is a config error and throws.
  */

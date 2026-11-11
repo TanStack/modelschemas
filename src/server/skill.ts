@@ -1,7 +1,7 @@
 /**
  * The distributable agent skill (PLAN.md task 7.6). The committed
  * skill/modelschemas/SKILL.md is generated from this module
- * (bun scripts/emit-skill.ts) and served at GET /skill; the endpoint
+ * (pnpm run emit-skill) and served at GET /skill; the endpoint
  * reference embeds llms.txt verbatim so the three surfaces never drift.
  */
 import { llmsTxt } from '#/server/llms-txt.ts'

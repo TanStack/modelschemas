@@ -83,7 +83,7 @@ export type ServiceStatus = {
       live: number
     }
     /**
-     * Present only when this provider has probe records older than 90 days. The probed facts stay served. Does not change status. Re-run with `bun scripts/probe.ts <provider> --write`.
+     * Present only when this provider has probe records older than 90 days. The probed facts stay served. Does not change status. Re-run with `pnpm run probe -- <provider> --write`.
      */
     staleProbes?: number
     /**
@@ -1464,7 +1464,7 @@ export type GetSchemaError = GetSchemaErrors[keyof GetSchemaErrors]
 
 export type GetSchemaResponses = {
   /**
-   * Self-contained JSON Schema ($defs-bundled) — or, with format=types, a TypeScript module — served with ETag. JSON responses carry `provenance` (upstream sourceUrl, sourceHash, fetchedAt, extractorVersion) so derivations are independently verifiable. `provenance.derivation` grades how the content was arrived at — `upstream-spec` and `generated` are re-derived every sync and self-heal. `probe-verified` is a live API call recorded in `src/server/providers/probes/<provider>.ts` on `provenance.verifiedAt` (`YYYY-MM-DD`). Re-run it with `bun scripts/probe.ts <provider> [--write]`. A record older than 90 days is still served; `GET /v1/status` counts those on `staleProbes`. `docs-derived` was never confirmed against the API. Both are point-in-time claims that can go stale.
+   * Self-contained JSON Schema ($defs-bundled) — or, with format=types, a TypeScript module — served with ETag. JSON responses carry `provenance` (upstream sourceUrl, sourceHash, fetchedAt, extractorVersion) so derivations are independently verifiable. `provenance.derivation` grades how the content was arrived at — `upstream-spec` and `generated` are re-derived every sync and self-heal. `probe-verified` is a live API call recorded in `src/server/providers/probes/<provider>.ts` on `provenance.verifiedAt` (`YYYY-MM-DD`). Re-run it with `pnpm run probe -- <provider> [--write]`. A record older than 90 days is still served; `GET /v1/status` counts those on `staleProbes`. `docs-derived` was never confirmed against the API. Both are point-in-time claims that can go stale.
    */
   200: {
     [key: string]: unknown

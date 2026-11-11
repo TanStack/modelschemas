@@ -6,7 +6,7 @@ verify offline at build time — production builds touch zero network.
 The package ships built ESM (`.js` + `.d.ts`). Node loads it with no TypeScript loader.
 
 ```bash
-bun add -D @modelschemas/vite
+pnpm add -D @modelschemas/vite
 ```
 
 ```ts

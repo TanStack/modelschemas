@@ -5,9 +5,14 @@
   "imports": {
     "#/*": "./src/*"
   },
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=11.9.0"
+  },
   "scripts": {
-    "version-packages": "changeset version && bun install --lockfile-only --ignore-scripts",
-    "dev": "bun run db:migrate && vite dev --port 3100",
+    "version-packages": "changeset version && pnpm install --lockfile-only --ignore-scripts",
+    "dev": "pnpm run db:migrate && vite dev --port 3100",
     "generate-routes": "tsr generate",
     "build": "vite build",
     "preview": "vite preview",
@@ -17,24 +22,34 @@
     "prepare": "lefthook install",
     "format": "oxfmt && oxlint --type-aware --fix",
     "check": "oxfmt --check",
-    "deploy": "bun run build && bun run deploy:ci",
+    "deploy": "pnpm run build && pnpm run deploy:ci",
     "deploy:ci": "wrangler d1 migrations apply modelschemas --remote && wrangler deploy",
-    "seed": "bun scripts/seed.ts",
-    "secrets:check": "bun scripts/push-secrets.ts",
-    "secrets:push": "bun scripts/push-secrets.ts --push",
-    "secrets:pull": "bun scripts/pull-secrets.ts --write",
-    "secrets:build": "bun scripts/build-with-secrets.ts",
+    "seed": "node --import ./scripts/register-hash-imports.mjs scripts/seed.ts",
+    "secrets:check": "node --import ./scripts/register-hash-imports.mjs scripts/push-secrets.ts",
+    "secrets:push": "node --import ./scripts/register-hash-imports.mjs scripts/push-secrets.ts --push",
+    "secrets:pull": "node --import ./scripts/register-hash-imports.mjs scripts/pull-secrets.ts --write",
+    "secrets:build": "node --import ./scripts/register-hash-imports.mjs scripts/build-with-secrets.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:studio": "drizzle-kit studio",
-    "openapi:emit": "bun scripts/emit-openapi.ts",
-    "generate:client": "bun run openapi:emit && cd packages/client && bunx openapi-ts",
-    "check:client": "bun run generate:client && git diff --exit-code openapi.json packages/client",
+    "openapi:emit": "node --import ./scripts/register-hash-imports.mjs scripts/emit-openapi.ts",
+    "generate:client": "pnpm run openapi:emit && pnpm --dir packages/client exec openapi-ts",
+    "check:client": "pnpm run generate:client && git diff --exit-code openapi.json packages/client",
     "types": "wrangler types --include-runtime=false",
-    "npm:pack": "bun scripts/npm-pack.ts",
-    "gap:report": "bun scripts/gap-report.ts",
-    "compare:models-dev": "bun scripts/compare-models-dev.ts"
+    "npm:pack": "node --import ./scripts/register-hash-imports.mjs scripts/npm-pack.ts",
+    "gap:report": "node --import ./scripts/register-hash-imports.mjs scripts/gap-report.ts",
+    "compare:models-dev": "node --import ./scripts/register-hash-imports.mjs scripts/compare-models-dev.ts",
+    "probe": "node --import ./scripts/register-hash-imports.mjs scripts/probe.ts",
+    "rederive": "node --import ./scripts/register-hash-imports.mjs scripts/rederive.ts",
+    "emit-skill": "node --import ./scripts/register-hash-imports.mjs scripts/emit-skill.ts",
+    "client-smoke": "node --import ./scripts/register-hash-imports.mjs scripts/client-smoke.ts",
+    "agent-roundtrip": "node --import ./scripts/register-hash-imports.mjs scripts/agent-roundtrip.ts",
+    "pull-roundtrip": "node --import ./scripts/register-hash-imports.mjs scripts/pull-roundtrip.ts",
+    "compare-fal": "node --import ./scripts/register-hash-imports.mjs scripts/compare-fal-extract-models.ts",
+    "fal-extract-smoke": "node --import ./scripts/register-hash-imports.mjs scripts/fal-extract-smoke.ts",
+    "mirror-catalog": "node scripts/mirror-catalog.ts",
+    "cli": "node --import ./scripts/register-hash-imports.mjs packages/cli/src/index.ts"
   },
   "dependencies": {
     "@better-auth/agent-auth": "^0.6.2",
@@ -79,9 +94,6 @@
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
-  "overrides": {
-    "@cloudflare/workers-types": "^5.20261019.1"
-  },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
     "@cloudflare/vitest-plugin": "^1.4.8",
@@ -105,20 +117,10 @@
     "oxfmt": "^0.74.0",
     "oxlint": "^1.89.0",
     "oxlint-tsgolint": "^7.0.2005",
-    "tsx": "^4.23.15",
+    "publint": "^0.3.15",
     "typescript": "7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.5",
     "wrangler": "^4.151.2"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "lightningcss"
-    ]
-  },
-  "workspaces": [
-    "packages/*",
-    "examples/*"
-  ]
+  }
 }

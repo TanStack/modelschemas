@@ -8,8 +8,8 @@ export const Route = createFileRoute('/examples')({
 })
 
 const CLONE_SNIPPET = `git clone https://github.com/TanStack/modelschemas
-cd modelschemas && bun install
-cd examples/schema-studio && bun run dev`
+cd modelschemas && pnpm install
+cd examples/schema-studio && pnpm run dev`
 
 function Examples() {
   return (
@@ -80,7 +80,7 @@ function Examples() {
           </CodePanel>
           <p className="mt-2.5 font-mono text-xs text-ink-faint">
             All three read from the live API at modelschemas.com — no key
-            needed. `bun run deploy` inside an example ships it to your own
+            needed. `pnpm run deploy` inside an example ships it to your own
             workers.dev subdomain.
           </p>
         </div>

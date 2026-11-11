@@ -38,7 +38,7 @@ describe('agent skill (SKILL.md)', () => {
     expect(skillMd).toContain(llmsTxt)
   })
 
-  it('matches the committed skill/modelschemas/SKILL.md (run bun scripts/emit-skill.ts after edits)', () => {
+  it('matches the committed skill/modelschemas/SKILL.md (run pnpm run emit-skill after edits)', () => {
     const committed = readFileSync(
       join(process.cwd(), 'skill', 'modelschemas', 'SKILL.md'),
       'utf8',

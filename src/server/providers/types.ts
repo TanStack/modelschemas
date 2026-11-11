@@ -84,7 +84,7 @@ export interface ProviderSecrets {
   SEED_SPEECH_API_KEY?: string
   /**
    * OpenCode Go data plane. The catalog and spec sync do not read it.
-   * `bun scripts/probe.ts opencode-go` does. Never log the value.
+   * `pnpm run probe -- opencode-go` does. Never log the value.
    */
   OPENCODE_GO_API_KEY?: string
   // Adapter-batch secrets (docs/providers-to-add.md). Optional: a missing

@@ -5,10 +5,10 @@
 // `GET /v1/schemas/{provider}/{activity}/{endpointId}` reports to verify
 // the service's stored schemas are honestly derived from their sources.
 //
-//   bun scripts/rederive.ts <provider>
+//   pnpm run rederive -- <provider>
 //
-// Bun auto-loads `.env.local`, so keyed providers (FAL) pick up their
-// secret; the upstream spec may also have moved since the service last
+// `scripts/register-hash-imports.mjs` loads `.env.local`, so keyed
+// providers (FAL) pick up their secret; the upstream spec may also have moved since the service last
 // synced — `provenance.sourceHash` tells you which document a stored
 // version came from.
 import { EXTRACTOR_VERSION } from '../src/server/ingest/bundle.ts'
@@ -20,7 +20,7 @@ const providerId = process.argv[2]
 const provider = providerId ? getProvider(providerId) : undefined
 if (!provider) {
   console.error(
-    `usage: bun scripts/rederive.ts <provider>\n` +
+    `usage: pnpm run rederive -- <provider>\n` +
       `providers: ${providerRegistry.map((p) => p.id).join(', ')}`,
   )
   process.exit(1)

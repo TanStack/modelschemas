@@ -65,7 +65,7 @@ surface behind all of this is `?format=types` on any
 `/v1/schemas/{provider}/{activity}/{endpointId}` read
 (`?optional=undefined` for `exactOptionalPropertyTypes` consumers who
 assign `undefined` explicitly). Verify locally end-to-end with
-`bun scripts/pull-roundtrip.ts`.
+`pnpm run pull-roundtrip`.
 
 ## Provenance & verification
 
@@ -84,7 +84,7 @@ every derivation is recorded and reproducible:
   `?version=<contentHash>` address, so a pinned version is immutable by
   construction.
 - **Re-derive the hashes yourself.** The extraction pipeline is this repo;
-  `bun scripts/rederive.ts <provider>` runs the same
+  `pnpm run rederive -- <provider>` runs the same
   fetchSpec → classify → bundle → hash pipeline the sync engine runs
   (shared code, `classifyAndBundle`) directly against the upstream spec —
   no service, no database — and prints every endpoint's `contentHash`.
@@ -229,42 +229,44 @@ packages end-to-end: **schema-studio** (`@modelschemas/vite` pulls →
 generative UI from JSON Schemas), **image-dimensions** (live image-model
 discovery, supported dimensions drawn to scale), and **video-composer**
 (request builder restricted to each video schema's allowed
-model/aspect-ratio/duration values). `bun install`, then `bun run dev`
+model/aspect-ratio/duration values). `pnpm install`, then `pnpm run dev`
 inside any example.
 
 ## Development
 
+Node.js 24 or newer (`package.json` `engines`). pnpm 11.9 (`packageManager`).
+
 ```bash
-bun install
-bun run dev              # dev server on http://localhost:3100 (NOT --bun)
-bun run test             # vitest: unit + workers-pool projects (NOT --bun)
-bun --bun run lint
-bun run typecheck
-bun --bun run build
+pnpm install
+pnpm run dev              # dev server on http://localhost:3100
+pnpm run test             # vitest: unit + workers-pool projects
+pnpm run lint
+pnpm run typecheck
+pnpm run build
 ```
 
 Local data setup:
 
 ```bash
-bun run db:migrate       # apply migrations to wrangler's local D1
-bun run seed             # seed the 8 providers
-bun run dev              # then, in another shell:
+pnpm run db:migrate       # apply migrations to wrangler's local D1
+pnpm run seed             # seed the 8 providers
+pnpm run dev              # then, in another shell:
 curl -X POST http://localhost:3100/v1/admin/sync/openrouter -H "X-Admin-Key: $ADMIN_KEY"
 ```
 
 Secrets live in `.env.local` (see CLAUDE.md). Pull them from Doppler:
 
 ```bash
-bun run secrets:pull     # Doppler `dev` → .env.local (strips DOPPLER_*)
+pnpm run secrets:pull     # Doppler `dev` → .env.local (strips DOPPLER_*)
 ```
 
 `ADMIN_KEY` gates `POST /v1/admin/sync/{provider}`,
 `POST /v1/admin/extract/fal`, and `GET /v1/admin/export` (the whole
 catalog in one streamed response, for the git mirror). Useful scripts:
-`bun scripts/agent-roundtrip.ts` (agent-auth end-to-end),
-`bun scripts/client-smoke.ts` (typed client), `bun run check:client`
-(client/spec drift), `bun scripts/emit-skill.ts` (regenerate SKILL.md),
-`bun scripts/rederive.ts <provider>` (re-derive schema hashes from the
+`pnpm run agent-roundtrip` (agent-auth end-to-end),
+`pnpm run client-smoke` (typed client), `pnpm run check:client`
+(client/spec drift), `pnpm run emit-skill` (regenerate SKILL.md),
+`pnpm run rederive -- <provider>` (re-derive schema hashes from the
 upstream spec, no service needed).
 
 PostHog browser and API analytics use `VITE_PUBLIC_POSTHOG_PROJECT_TOKEN`
@@ -277,8 +279,8 @@ signals.
 
 Vite reads the public variables at build time. Configure both variables in
 the Cloudflare Workers Builds environment before building production, or
-build locally with `bun run secrets:build` (defaults to Doppler `prd`;
-use `bun run secrets:build --config dev` for another config). This injects
+build locally with `pnpm run secrets:build` (defaults to Doppler `prd`;
+use `pnpm run secrets:build --config dev` for another config). This injects
 only `VITE_PUBLIC_*` values from Doppler into the build process without
 writing them to disk.
 `secrets:push` only supplies Worker runtime bindings; it does not configure
@@ -291,15 +293,15 @@ configuration with an error.
 1. Create resources and put their IDs in `wrangler.jsonc`:
 
    ```bash
-   bunx wrangler d1 create modelschemas        # → d1_databases[0].database_id
-   bunx wrangler kv namespace create SCHEMA_CACHE  # → kv_namespaces[0].id
+   pnpm exec wrangler d1 create modelschemas        # → d1_databases[0].database_id
+   pnpm exec wrangler kv namespace create SCHEMA_CACHE  # → kv_namespaces[0].id
    ```
 
 2. Apply migrations and seed:
 
    ```bash
-   bun run db:migrate:remote
-   bun run seed -- --remote
+   pnpm run db:migrate:remote
+   pnpm run seed -- --remote
    ```
 
 3. Secrets (`wrangler secret put <NAME>`): `BETTER_AUTH_SECRET` (32+ random
@@ -322,8 +324,8 @@ configuration with an error.
    Rather than setting them one at a time, reconcile against Doppler:
 
    ```bash
-   bun run secrets:check   # Doppler prd ↔ Worker (names only)
-   bun run secrets:push    # apply (one wrangler secret bulk call)
+   pnpm run secrets:check   # Doppler prd ↔ Worker (names only)
+   pnpm run secrets:push    # apply (one wrangler secret bulk call)
    ```
 
    It runs locally against your existing Doppler and wrangler logins, so no
@@ -341,7 +343,7 @@ configuration with an error.
 4. Deploy and warm:
 
    ```bash
-   bun run deploy
+   pnpm run deploy
    curl https://<worker-url>/v1/status
    curl -X POST https://<worker-url>/v1/admin/sync/openrouter -H "X-Admin-Key: ..."
    ```
@@ -369,7 +371,7 @@ in `wrangler.jsonc` (TanStack AI `chat()` with the Anthropic adapter over
 `cloudflareBindingFetch` from `@tanstack/ai-cloudflare`). Create that gateway in the dashboard (AI →
 AI Gateway) and load credits on the account. Without them every
 leftover fails and the cursor rewinds, as it does for any extract
-error. Re-pick the model with `bun scripts/compare-fal-extract-models.ts`.
+error. Re-pick the model with `pnpm run compare-fal --`.
 
 ### Continuous deploys (Workers Builds)
 
@@ -380,8 +382,9 @@ Pushes to `main` deploy via Cloudflare Workers Builds (dashboard → Workers
 
 Settings:
 
-- **Build command:** `bun run build`
-- **Deploy command:** `bun run deploy:ci` — applies pending D1 migrations
+- **Node.js version:** 24
+- **Build command:** `pnpm run build`
+- **Deploy command:** `pnpm run deploy:ci` — applies pending D1 migrations
   (`wrangler d1 migrations apply modelschemas --remote`, by database name so
   a binding rename can't retarget it) and then `wrangler deploy`, which
   follows the build-emitted redirect (`.wrangler/deploy/config.json`) to the
@@ -391,14 +394,14 @@ Settings:
   `npx wrangler versions upload` — preview versions share the production D1
   binding, so migrations must never run from non-production branches.
 
-`bun run deploy` remains the manual/emergency path (build + the same
+`pnpm run deploy` remains the manual/emergency path (build + the same
 migrate-then-deploy).
 
 A green CI run is not a deploy. Before debugging a production symptom a
 merged PR should have fixed, confirm the merge is live:
 
 ```bash
-CLOUDFLARE_ACCOUNT_ID=<account> bunx wrangler deployments list --name modelschemas | tail
+CLOUDFLARE_ACCOUNT_ID=<account> pnpm exec wrangler deployments list --name modelschemas | tail
 ```
 
 The newest `Created:` must postdate the merge. If it does not, the Builds
@@ -409,7 +412,7 @@ the production browser config:
 
 ```bash
 DOPPLER_PROJECT=modelschemas CLOUDFLARE_ACCOUNT_ID=<account> \
-  bun run secrets:build && bun run deploy:ci
+  pnpm run secrets:build && pnpm run deploy:ci
 ```
 
 `DOPPLER_PROJECT` is needed because the secrets scripts pass no
@@ -431,8 +434,9 @@ Five public packages (`0.1.0` is on the registry; `@modelschemas/rate-card` from
 | `modelschemas` (CLI, unscoped) | `packages/cli`       |
 
 CI **never** holds an npm token. `.github/workflows/publish.yml` packs
-with Bun (rewrites `workspace:*`), then `npm stage publish` over GitHub
-OIDC. A human 2FA-approves each staged version before it is installable.
+with `pnpm run npm:pack` (pins `workspace:*`), then `npm stage publish`
+over GitHub OIDC. A human 2FA-approves each staged version before it is
+installable.
 
 ### Bootstrap (done 2026-08-21)
 
@@ -462,7 +466,7 @@ reviewer; deployment branches limited to `main` and tags `v*`.
 ### Ongoing releases
 
 1. A PR that changes a published package adds a changeset
-   (`bunx changeset`). The five packages share one version. MAJOR.MINOR
+   (`pnpm exec changeset`). The five packages share one version. MAJOR.MINOR
    must equal `RATE_CARD_LANGUAGE` in `packages/rate-card/src/card.ts`
    (a test checks it): a release that changes what a card can say bumps
    both (minor), and a release that does not is a patch.
@@ -481,11 +485,11 @@ Dry-run the pipeline without staging:
 ```bash
 # Actions → Publish → Run workflow, leave dry_run checked
 # or locally:
-bun scripts/npm-pack.ts --pack-dir dist/npm
+pnpm run npm:pack -- --pack-dir dist/npm
 ```
 
-Do not add `NPM_TOKEN` / `NODE_AUTH_TOKEN` to GitHub Secrets. `bun publish`
-is token-auth only and is not used for releases.
+Do not add `NPM_TOKEN` / `NODE_AUTH_TOKEN` to GitHub Secrets. Token
+`npm publish` is not used for releases.
 
 ## Runbook: a provider sync is failing
 
@@ -495,7 +499,7 @@ is token-auth only and is not used for releases.
    dashboard's Workers Logs works too):
 
    ```bash
-   bunx wrangler tail modelschemas --format pretty
+   pnpm exec wrangler tail modelschemas --format pretty
    # in another shell:
    curl -X POST https://<worker-url>/v1/admin/sync/<provider> -H "X-Admin-Key: ..."
    ```

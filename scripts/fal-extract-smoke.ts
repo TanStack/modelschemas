@@ -4,7 +4,7 @@
  * #551 and #556 shipped without exercising (#552). Prints the Pricing
  * section, then the card or the rejection. Billed to Unified Billing.
  *
- *   CLOUDFLARE_ACCOUNT_ID=… bunx tsx scripts/fal-extract-smoke.ts [fal model id]
+ *   CLOUDFLARE_ACCOUNT_ID=… pnpm run fal-extract-smoke -- [fal model id]
  *
  * Node, not bun: wrangler's remote bindings cannot run under bun
  * (oven-sh/bun#39247). Needs `wrangler login`, and `FAL_KEY` (env or

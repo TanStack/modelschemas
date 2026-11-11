@@ -390,7 +390,7 @@ describe('getServiceStatus', () => {
       silent: ['cacheRead'],
     })
 
-    // The same rows as `bun run gap:report` reads them, off the API.
+    // The same rows as `pnpm run gap:report` reads them, off the API.
     const served = await listModelsCatalog(db, { pricing: true })
     const report = buildReport(served.models as Array<ModelRow>, ledger)
     for (const id of ['all-silent', 'mixed']) {

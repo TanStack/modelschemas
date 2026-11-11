@@ -6,7 +6,7 @@
  * (SHA-256 of the recursively key-sorted JSON), so a match proves the
  * service serves exactly the bytes the pinned hash names — nothing to
  * take on trust. Full re-derivation from the upstream provider spec lives
- * in the service repo (`bun scripts/rederive.ts <provider>`); the
+ * in the service repo (`pnpm run rederive -- <provider>`); the
  * `provenance` echoed per check says which upstream document to audit.
  */
 import { createHash } from 'node:crypto'

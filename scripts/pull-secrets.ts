@@ -8,9 +8,9 @@
  * Values are never printed. Dry run unless `--write` is passed.
  *
  * Usage:
- *   bun scripts/pull-secrets.ts                 # report
- *   bun scripts/pull-secrets.ts --write         # write .env.local
- *   bun scripts/pull-secrets.ts --config stg    # non-dev source
+ *   pnpm run secrets:pull                 # report
+ *   pnpm run secrets:pull --write         # write .env.local
+ *   pnpm run secrets:pull --config stg    # non-dev source
  */
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 
@@ -81,7 +81,7 @@ if (!write) {
 writeFileSync(
   dest,
   formatEnvFile(next, [
-    `Written by bun run secrets:pull from Doppler config \`${dopplerConfig}\`.`,
+    `Written by pnpm run secrets:pull from Doppler config \`${dopplerConfig}\`.`,
     'DOPPLER_* is stripped. Local-only keys not in Doppler are kept.',
   ]),
   { encoding: 'utf8' },

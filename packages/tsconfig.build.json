@@ -1,4 +1,4 @@
-// Shared `bun run build` config: dist/*.js + .d.ts, the files npm ships
+// Shared `pnpm run build` config: dist/*.js + .d.ts, the files npm ships
 // (scripts/npm-pack.ts lifts publishConfig onto the packed manifest).
 // Each package extends this and adds only its lib/types.
 {

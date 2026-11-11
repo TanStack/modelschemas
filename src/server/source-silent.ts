@@ -1,8 +1,8 @@
 /**
  * The source-silent ledger (`docs/source-silent/<provider>.md`), bundled at
  * build time so the Worker scores completeness with the same files
- * `bun run gap:report` reads from disk. Vite and vitest transform
- * `import.meta.glob`; bun does not, so the script reads them with `fs`.
+ * `pnpm run gap:report` reads from disk. Vite and vitest transform
+ * `import.meta.glob`; Node does not, so the script reads them with `fs`.
  */
 import { parseLedger } from '#/lib/completeness.ts'
 import { parseSourceSilentEvidence } from './source-silent-facts.ts'

@@ -2,10 +2,10 @@
  * Gap report: which facts `@tanstack/ai-models` needs are still missing,
  * per provider, over chat rows. One HTTP request; no per-model detail calls.
  *
- *   bun run gap:report                       # JSON
- *   bun run gap:report --table               # readable, worst score first
- *   bun run gap:report --base http://localhost:3100
- *   bun run gap:report --check --providers grok,mistral --target 0.9
+ *   pnpm run gap:report                       # JSON
+ *   pnpm run gap:report -- --table            # readable, worst score first
+ *   pnpm run gap:report -- --base http://localhost:3100
+ *   pnpm run gap:report -- --check --providers grok,mistral --target 0.9
  *
  * `docs/source-silent/<provider>.md` lists facts a provider does not publish; those
  * are left out of that provider's score and listed under `silent`. `flags`

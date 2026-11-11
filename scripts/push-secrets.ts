@@ -15,7 +15,7 @@
  * - Doppler is the source of truth. Everything in the config is pushed
  *   except the remove list (`DOPPLER_*` context vars, plus
  *   `BETTER_AUTH_URL` which is already a wrangler `vars` binding, and
- *   `VITE_*` build-time variables). Use `bun run secrets:build` to build
+ *   `VITE_*` build-time variables). Use `pnpm run secrets:build` to build
  *   with public configuration from Doppler.
  *   `DOPPLER_*` are not application secrets; pushing them is how the
  *   deployed Worker ended up with three junk bindings.
@@ -28,10 +28,11 @@
  * the next deploy inherits them. See the push call at the bottom for why.
  *
  * Usage:
- *   bun scripts/push-secrets.ts                # reconcile + report
- *   bun scripts/push-secrets.ts --push         # apply
- *   bun scripts/push-secrets.ts --config stg   # non-prod target
+ *   pnpm run secrets:check                      # reconcile + report
+ *   pnpm run secrets:push                       # apply
+ *   pnpm run secrets:check -- --config stg      # non-prod target
  */
+import { packageBin } from './package-bin.ts'
 import {
   PUSH_REMOVE_LIST,
   dopplerSecrets,
@@ -45,8 +46,10 @@ const push = process.argv.includes('--push')
 const dopplerConfig = parseConfigFlag(process.argv.slice(2), 'prd')
 
 /** Secret names currently bound to the deployed Worker (names only). */
+const wrangler = packageBin('wrangler')
+
 function workerSecretNames(): Set<string> {
-  const raw = run('bunx', ['wrangler', 'secret', 'list'])
+  const raw = run(process.execPath, [wrangler, 'secret', 'list'])
   const parsed = JSON.parse(raw) as Array<{ name: string }>
   return new Set(parsed.map((s) => s.name))
 }
@@ -79,7 +82,7 @@ if (dropped.length > 0) {
 if (dropped.some((name) => name.startsWith('VITE_'))) {
   console.log(
     '  VITE_* values are build-time configuration, not Worker secrets.' +
-      '\n  Build with bun run secrets:build, or configure Workers Builds variables.',
+      '\n  Build with pnpm run secrets:build, or configure Workers Builds variables.',
   )
 }
 
@@ -134,7 +137,11 @@ if (count === 0) {
  * seeing a value). Only the bindings inherit, not the code, so staging from
  * a branch cannot leak unmerged code into a later deploy.
  */
-run('bunx', ['wrangler', 'versions', 'secret', 'bulk'], JSON.stringify(payload))
+run(
+  process.execPath,
+  [wrangler, 'versions', 'secret', 'bulk'],
+  JSON.stringify(payload),
+)
 console.log(
   `\nWrote ${count} secret(s) into a new version.` +
     `\nThey go live with the next deploy, which inherits them.\n`,

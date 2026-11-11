@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3202",
-    "build": "vite build && bun scripts/nest-hosted-assets.ts",
+    "build": "vite build && node scripts/nest-hosted-assets.ts",
     "preview": "vite preview",
-    "deploy": "bun run build && wrangler deploy"
+    "deploy": "pnpm run build && wrangler deploy"
   },
   "dependencies": {
     "@modelschemas/client": "workspace:*",
