@@ -389,10 +389,22 @@ describe('issue #109 listModels', () => {
         if (url.endsWith('/capabilities/reasoning.md')) {
           return new Response(
             `
-| Model | Default | \`reasoning_effort\` | Disable reasoning | Availability |
-| - | - | - | - | - |
-| [\`gpt-oss-120b\`](/models/openai-oss) | \`medium\` | \`low\`, \`medium\`, \`high\` | Not supported | Shared Inference |
-| \`kimi-k2.7-code\` | Always enabled | Accepted but ignored | Not supported | Customer trials only |
+| Model | Default effort | Availability |
+| - | - | - |
+| [GPT OSS 120B](#gpt-oss-120b) | \`medium\` | Shared and Dedicated Inference |
+
+## Model behavior
+
+### GPT OSS 120B
+
+[\`gpt-oss-120b\`](/models/openai-oss) always enables reasoning. Use \`reasoning_effort\` to select one of the following levels.
+
+| Value | Behavior |
+| - | - |
+| \`low\` | Selects low reasoning effort |
+| \`medium\` (default) | Selects medium reasoning effort |
+| \`high\` | Selects high reasoning effort |
+| \`none\` | Not supported |
 `,
             { status: 200 },
           )

@@ -1,0 +1,315 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://inference-docs.cerebras.ai/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Reasoning
+
+> Set reasoning effort, choose a response format, and manage reasoning across conversation turns.
+
+Reasoning models generate intermediate thinking tokens before their final answer. Use `reasoning_effort` to select a model's reasoning level and `reasoning_format` to control how the API returns its reasoning.
+
+Reasoning tokens count toward `max_completion_tokens` and the completion-token usage reported by the API. Effort levels select model-specific reasoning modes; they don't reserve or guarantee an exact token budget.
+
+## Supported models
+
+The following models support reasoning. Select a model to see its supported effort levels and an example request.
+
+| Model | Default effort | Availability |
+| - | - | - |
+| [Qwen 3.8 27B](#qwen-3-8-27b) | `high` | Shared and Dedicated Inference |
+| [Kimi K2.7 Code](#kimi-k2-7-code) | Not configurable | Dedicated Inference |
+| [Kimi K3](#kimi-k3) | `max` | Dedicated Inference |
+| [Kimi K3.1 Pro](#kimi-k3-1-pro) | `max` | Dedicated Inference |
+| [GLM 5.3 Flash](#glm-5-3-flash) | `max` | Dedicated Inference |
+| [GPT OSS 120B](#gpt-oss-120b) | `medium` | Shared and Dedicated Inference |
+| [Gemma 4 31B](#gemma-4-31b) | `none` (disabled) | Dedicated Inference |
+
+For Shared Inference, use the model ID listed in the [model catalog](https://inference-docs.cerebras.ai/models/overview). For [Dedicated Inference](https://inference-docs.cerebras.ai/dedicated/overview.md#supported-models), use the endpoint ID assigned to your organization as the request's `model` value.
+
+## Send a reasoning request
+
+Install the Cerebras Python SDK and set `CEREBRAS_API_KEY` as described in the [Quickstart](https://inference-docs.cerebras.ai/quickstart.md). This example selects `medium` effort for GPT OSS 120B and prints the reasoning separately from the final answer.
+
+```python theme={null}
+from cerebras.cloud.sdk import Cerebras
+
+client = Cerebras()
+
+response = client.chat.completions.create(
+    model="gpt-oss-120b",
+    messages=[
+        {"role": "user", "content": "Review this retry policy: retry failed jobs immediately."}
+    ],
+    reasoning_effort="medium",
+    reasoning_format="parsed",
+)
+
+print("Reasoning:", response.choices[0].message.reasoning)
+print("Answer:", response.choices[0].message.content)
+```
+
+For streaming responses, read reasoning from `choices[0].delta.reasoning` and final-answer text from `choices[0].delta.content`.
+
+The remaining Python examples reuse `client`. In Dedicated Inference examples, replace `YOUR_ENDPOINT_ID` with your assigned endpoint ID for that model.
+
+## Reasoning format
+
+Use `reasoning_format` to select how the API returns reasoning. Support varies by model.
+
+| Value | Behavior |
+| - | - |
+| `parsed` | Returns reasoning in `choices[0].message.reasoning` and the final answer in `choices[0].message.content` |
+| `raw` | Includes reasoning in the final-answer content when supported |
+| `hidden` | Omits reasoning text while still generating and counting reasoning tokens |
+| `none` | Uses the model's default response format |
+
+The following table summarizes format support. A value of `none` for `reasoning_format` doesn't disable reasoning. To disable reasoning on a model that supports it, use `reasoning_effort="none"`.
+
+| Model | Default response behavior | `raw` | `hidden` |
+| - | - | - | - |
+| [Qwen 3.8 27B](#qwen-3-8-27b) | Reasoning returned separately | Keeps reasoning separate | Not supported |
+| [Kimi K2.7 Code](#kimi-k2-7-code) | `parsed` | Supported | Not supported |
+| [Kimi K3](#kimi-k3) | `parsed` | Not supported | Not supported |
+| [Kimi K3.1 Pro](#kimi-k3-1-pro) | `parsed` | Not supported | Not supported |
+| [GLM 5.3 Flash](#glm-5-3-flash) | `parsed` | Supported | Supported |
+| [GPT OSS 120B](#gpt-oss-120b) | `parsed` | Supported | Supported |
+| [Gemma 4 31B](#gemma-4-31b) | Reasoning disabled until enabled | Not supported | Not supported |
+
+## Model behavior
+
+Each section lists the model's reasoning effort values, shows an example request, and describes its format restrictions.
+
+### Qwen 3.8 27B
+
+[`qwen-3.8-27b`](https://inference-docs.cerebras.ai/models/qwen-3.8-27b) enables reasoning by default. Use `reasoning_effort` to select one of the following modes.
+
+| Value | Behavior |
+| - | - |
+| `none` | Disables reasoning |
+| `low` | Selects Qwen's low reasoning mode |
+| `medium` | Selects Qwen's medium reasoning mode |
+| `high` (default) | Selects Qwen's native `xhigh` reasoning mode |
+
+This example selects `high` effort. To disable reasoning, set `reasoning_effort` to `none`.
+
+```python theme={null}
+response = client.chat.completions.create(
+    model="qwen-3.8-27b",
+    messages=[
+        {"role": "user", "content": "Review this retry policy: retry failed jobs immediately."}
+    ],
+    reasoning_effort="high",
+    reasoning_format="parsed",
+)
+```
+
+**Response format:** Reasoning is returned separately in `message.reasoning` or streaming `delta.reasoning`. Setting `reasoning_format` to `raw` doesn't change this behavior. The `hidden` format isn't supported.
+
+**Conversation history:** Use `clear_thinking` to preserve or remove historical assistant reasoning. See [Multi-turn reasoning](#multi-turn-reasoning-and-clear_thinking).
+
+Do not send Qwen-native parameters such as `disable_reasoning`, `enable_thinking`, `preserve_thinking`, or `thinking_budget`. Use `reasoning_effort` and `clear_thinking` instead.
+
+### Kimi K2.7 Code
+
+[`kimi-k2.7-code`](https://inference-docs.cerebras.ai/dedicated/overview#supported-models) always enables reasoning. The API accepts `reasoning_effort` for client compatibility but ignores its value.
+
+| Value | Behavior |
+| - | - |
+| Omitted | Keeps reasoning enabled |
+| Any accepted value, including `none` | Keeps reasoning enabled; doesn't change reasoning effort |
+
+This example requests parsed reasoning and omits `reasoning_effort` because it has no effect.
+
+```python theme={null}
+response = client.chat.completions.create(
+    model="YOUR_ENDPOINT_ID",
+    messages=[
+        {"role": "user", "content": "Review this retry policy: retry failed jobs immediately."}
+    ],
+    reasoning_format="parsed",
+)
+```
+
+**Response format:** The default is `parsed`. The `raw` format is supported; `hidden` isn't supported.
+
+**Conversation history:** `clear_thinking` isn't implemented. Do not send it.
+
+> [!WARNING]
+>
+> Do not combine `reasoning_format="raw"` with `response_format` types `json_object` or `json_schema` for Kimi K2.7 Code.
+
+### Kimi K3
+
+[`kimi-k3`](https://inference-docs.cerebras.ai/dedicated/overview#supported-models) always enables reasoning. Use `reasoning_effort` to select one of the following levels.
+
+| Value | Behavior |
+| - | - |
+| `low` | Selects low reasoning effort |
+| `high` | Selects high reasoning effort |
+| `max` (default) | Selects maximum reasoning effort |
+| `medium`, `none` | Not supported |
+
+This example selects `high` effort and parsed reasoning.
+
+```python theme={null}
+response = client.chat.completions.create(
+    model="YOUR_ENDPOINT_ID",
+    messages=[
+        {"role": "user", "content": "Review this retry policy: retry failed jobs immediately."}
+    ],
+    reasoning_effort="high",
+    reasoning_format="parsed",
+)
+```
+
+**Response format:** Only `parsed` is supported. Omit `reasoning_format` or set it to `parsed`. Do not send `raw` or `hidden`.
+
+**Conversation history:** Replay the complete assistant response, including reasoning and tool calls. Kimi K3 preserves reasoning history. Do not send `clear_thinking`.
+
+### Kimi K3.1 Pro
+
+[`kimi-k3.1-pro`](https://inference-docs.cerebras.ai/dedicated/overview#supported-models) always enables reasoning. Use `reasoning_effort` to select one of the following levels.
+
+| Value | Behavior |
+| - | - |
+| `low` | Selects low reasoning effort |
+| `medium` | Selects medium reasoning effort |
+| `high` | Selects high reasoning effort |
+| `max` (default) | Selects maximum reasoning effort |
+| `none` | Not supported |
+
+This example selects `medium` effort and parsed reasoning.
+
+```python theme={null}
+response = client.chat.completions.create(
+    model="YOUR_ENDPOINT_ID",
+    messages=[
+        {"role": "user", "content": "Review this retry policy: retry failed jobs immediately."}
+    ],
+    reasoning_effort="medium",
+    reasoning_format="parsed",
+)
+```
+
+**Response format:** Only `parsed` is supported. Omit `reasoning_format` or set it to `parsed`. Do not send `raw` or `hidden`.
+
+**Conversation history:** Replay the complete assistant response, including reasoning and tool calls. Kimi K3.1 Pro preserves reasoning history. Do not send `clear_thinking`.
+
+### GLM 5.3 Flash
+
+[`zai-glm-5.3-flash`](https://inference-docs.cerebras.ai/dedicated/overview#supported-models) always enables reasoning. Use `reasoning_effort` to select one of the following levels.
+
+| Value | Behavior |
+| - | - |
+| `low` | Selects low reasoning effort |
+| `high` | Selects high reasoning effort |
+| `max` (default) | Selects maximum reasoning effort |
+| `medium`, `none` | Not supported |
+
+This example selects `high` effort and parsed reasoning.
+
+```python theme={null}
+response = client.chat.completions.create(
+    model="YOUR_ENDPOINT_ID",
+    messages=[
+        {"role": "user", "content": "Review this retry policy: retry failed jobs immediately."}
+    ],
+    reasoning_effort="high",
+    reasoning_format="parsed",
+)
+```
+
+**Response format:** The default is `parsed`. Both `raw` and `hidden` are supported. The `hidden` format omits reasoning text while the model still generates and counts reasoning tokens.
+
+**Conversation history:** Use `clear_thinking` to preserve historical assistant reasoning or remove reasoning before the latest user message. See [Multi-turn reasoning](#multi-turn-reasoning-and-clear_thinking).
+
+### GPT OSS 120B
+
+[`gpt-oss-120b`](https://inference-docs.cerebras.ai/models/openai-oss) always enables reasoning. Use `reasoning_effort` to select one of the following levels.
+
+| Value | Behavior |
+| - | - |
+| `low` | Selects low reasoning effort |
+| `medium` (default) | Selects medium reasoning effort |
+| `high` | Selects high reasoning effort |
+| `none` | Not supported |
+
+This example selects `medium` effort and parsed reasoning.
+
+```python theme={null}
+response = client.chat.completions.create(
+    model="gpt-oss-120b",
+    messages=[
+        {"role": "user", "content": "Review this retry policy: retry failed jobs immediately."}
+    ],
+    reasoning_effort="medium",
+    reasoning_format="parsed",
+)
+```
+
+**Response format:** The default is `parsed`. Both `raw` and `hidden` are supported. With `raw`, reasoning and final-answer content are concatenated without separators.
+
+### Gemma 4 31B
+
+[`gemma-4-31b`](https://inference-docs.cerebras.ai/dedicated/overview#supported-models) disables reasoning by default. Use `reasoning_effort` to enable or disable reasoning.
+
+| Value | Behavior |
+| - | - |
+| `none` (default) | Disables reasoning |
+| `low`, `medium`, `high` | Enables reasoning; all three values behave equivalently |
+
+This example enables reasoning with `medium` effort and requests parsed reasoning.
+
+```python theme={null}
+response = client.chat.completions.create(
+    model="YOUR_ENDPOINT_ID",
+    messages=[
+        {"role": "user", "content": "Review this retry policy: retry failed jobs immediately."}
+    ],
+    reasoning_effort="medium",
+    reasoning_format="parsed",
+)
+```
+
+**Response format:** The `raw` and `hidden` formats aren't supported.
+
+**Conversation history:** `clear_thinking` isn't supported. Do not send it.
+
+## Multi-turn reasoning and `clear_thinking`
+
+Chat Completions is stateless. Resend conversation history with each request, including any assistant reasoning and tool calls required by the model. For tool calls, include the full assistant response followed by a matching result for each tool-call ID. See [Tool Calling](https://inference-docs.cerebras.ai/capabilities/tool-use.md).
+
+For Qwen 3.8 27B and GLM 5.3 Flash, `clear_thinking` controls whether the model receives historical assistant reasoning. It doesn't remove the assistant's final-answer content.
+
+| Model | `false` or omitted (default) | `true` |
+| - | - | - |
+| Qwen 3.8 27B | Preserves historical assistant reasoning | Removes historical assistant reasoning |
+| GLM 5.3 Flash | Preserves historical assistant reasoning | Removes assistant reasoning before the latest user message |
+
+This example makes a Qwen request, includes its reasoning in the conversation history, and removes that reasoning from the follow-up prompt with `clear_thinking=True`. To preserve the reasoning instead, omit `clear_thinking` or set it to `False`.
+
+```python theme={null}
+messages = [{"role": "user", "content": "Design a retry strategy for a payment queue."}]
+first = client.chat.completions.create(
+    model="qwen-3.8-27b",
+    messages=messages,
+)
+
+assistant = first.choices[0].message
+messages.extend([
+    assistant.model_dump(exclude_none=True),
+    {"role": "user", "content": "Now account for duplicate delivery."},
+])
+
+follow_up = client.chat.completions.create(
+    model="qwen-3.8-27b",
+    messages=messages,
+    clear_thinking=True,
+)
+
+print(follow_up.choices[0].message.content)
+```
+
+## OpenAI client parameters
+
+`reasoning_effort` is a standard OpenAI client parameter. Pass Cerebras-specific parameters such as `reasoning_format` and `clear_thinking` through `extra_body` when you use an OpenAI client. See [OpenAI Compatibility](https://inference-docs.cerebras.ai/resources/openai.md#pass-non-standard-parameters).
