@@ -838,29 +838,52 @@ export function parseByteplusVideo(
   return out
 }
 
+interface ImageRow {
+  id: string
+  input: string
+  output: string
+  cells: Array<string>
+}
+
 /**
- * Image table: `Model ID ‖ Input image ‖ Output image`, USD per image
- * (`$0.035`). Only flat rows with free input images are read here; Seedream 5.0
- * pro's pixel-tiered row is `parseByteplusPixelTiers`. Only the first
- * matching table is read.
+ * Image table rows: `Model ID ‖ Input image ‖ Output image`. Since
+ * 2026-11-12 (#640) the output header carries a note line ("P is the total
+ * pixel count of a single output image."), so that column is the one header
+ * starting "Output image". Only the first matching table is read.
+ */
+function imageRows(doc: ByteplusDoc): Array<ImageRow> {
+  for (const { keys, rows } of tablesWith(doc, ['model id', 'input image'])) {
+    const outputs = keys.flatMap((key, at) =>
+      /^output image\b/.test(key) ? [at] : [],
+    )
+    const [output] = outputs
+    if (output === undefined || outputs.length > 1) continue
+    return rows.map((cells) => ({
+      id: (cells[keys.indexOf('model id')] ?? '').split(' ')[0] ?? '',
+      input: (cells[keys.indexOf('input image')] ?? '').trim(),
+      output: (cells[output] ?? '').trim(),
+      cells,
+    }))
+  }
+  return []
+}
+
+/**
+ * Flat image rows, USD per output image (`$0.035`) with free input images.
+ * Seedream 5.0 pro's pixel-tiered row is `parseByteplusPixelTiers`; any
+ * other row (Seedream 5.5's paid inputs and bounded pixel tiers) is
+ * unpriced and warned.
  */
 export function parseByteplusImages(doc: ByteplusDoc): Map<string, number> {
   const out = new Map<string, number>()
-  const [table] = tablesWith(doc, ['model id', 'input image', 'output image'])
-  if (!table) return out
-  const at = (key: string) => table.keys.indexOf(key)
-  for (const row of table.rows) {
-    const id = (row[at('model id')] ?? '').split(' ')[0] ?? ''
+  for (const { id, input, output, cells } of imageRows(doc)) {
     if (!/^[a-z0-9-]+$/.test(id)) continue
-    const input = (row[at('input image')] ?? '').trim()
-    const output = dollars((row[at('output image')] ?? '').trim())
-    if (!/^free$/i.test(input) || output === null) {
-      // Pixel-tiered rows belong to `parseByteplusPixelTiers`.
-      const tiered = pixelTierRates(input, row[at('output image')] ?? '')
-      if (!tiered) warnUnread('image', id, row)
+    const rate = dollars(output)
+    if (!/^free$/i.test(input) || rate === null) {
+      if (!pixelTierRates(input, output)) warnUnread('image', id, cells)
       continue
     }
-    out.set(id, output)
+    out.set(id, rate)
   }
   return out
 }
@@ -1009,7 +1032,7 @@ const PIXEL_TIER_INPUT =
 // Layer decomposition is not read: the page says one request's layers can
 // land in different tiers, so the card refuses that mode.
 const PIXEL_TIER_OUTPUT =
-  /^Single-image generation: Up to ([\d.]+) million pixels \(([\d.]+)K or lower\): \$([\d.]+) More than \1 million pixels \(higher than \2K\): \$([\d.]+) Layer decomposition: /i
+  /^Single-image generation: P ≤ ([\d.]+) million \(([\d.]+)K or lower\): \$([\d.]+) P > \1 million \(higher than \2K\): \$([\d.]+) Layer decomposition: /i
 
 /** One image-table row as pixel tiers, or null for any other wording. */
 function pixelTierRates(
@@ -1034,15 +1057,8 @@ export function parseByteplusPixelTiers(
   doc: ByteplusDoc,
 ): Map<string, ByteplusPixelTiers> {
   const out = new Map<string, ByteplusPixelTiers>()
-  const [table] = tablesWith(doc, ['model id', 'input image', 'output image'])
-  if (!table) return out
-  const at = (key: string) => table.keys.indexOf(key)
-  for (const row of table.rows) {
-    const id = (row[at('model id')] ?? '').split(' ')[0] ?? ''
-    const rates = pixelTierRates(
-      row[at('input image')] ?? '',
-      row[at('output image')] ?? '',
-    )
+  for (const { id, input, output } of imageRows(doc)) {
+    const rates = pixelTierRates(input, output)
     if (/^[a-z0-9-]+$/.test(id) && rates) out.set(id, rates)
   }
   return out
