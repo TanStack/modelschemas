@@ -75,6 +75,13 @@ interface FalApiModel {
  */
 const FAL_UNLISTED_ENDPOINT_IDS = ['fal-ai/whisper']
 
+/**
+ * Body of a filtered models request whose `endpoint_id` FAL no longer
+ * serves. One such id 404s the whole batch (`Endpoint(s) not found`).
+ * Any other 404 is a different failure and must still throw.
+ */
+const FAL_ENDPOINT_NOT_FOUND = 'Endpoint(s) not found'
+
 function openApiCategory(model: FalApiModel): string | null {
   const meta = model.openapi?.info?.['x-fal-metadata']
   if (typeof meta !== 'object' || meta === null || !('category' in meta)) {
@@ -179,9 +186,46 @@ class FalFetchError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly body: string,
   ) {
     super(message)
   }
+}
+
+/** True when FAL says this filtered request names an endpoint it no longer serves. */
+function falEndpointGone(error: unknown): error is FalFetchError {
+  if (!(error instanceof FalFetchError) || error.status !== 404) return false
+  try {
+    const parsed: unknown = JSON.parse(error.body)
+    if (typeof parsed !== 'object' || parsed === null || !('error' in parsed)) {
+      return false
+    }
+    const inner = parsed.error
+    if (typeof inner !== 'object' || inner === null) return false
+    return (
+      'type' in inner &&
+      inner.type === 'not_found' &&
+      'message' in inner &&
+      inner.message === FAL_ENDPOINT_NOT_FOUND
+    )
+  } catch {
+    return false
+  }
+}
+
+/** The single-id request that proved `id` is gone, for the poll log. */
+function goneEndpointLocation(id: string, expandOpenApi: boolean): string {
+  const params = new URLSearchParams({ status: 'active' })
+  if (expandOpenApi) params.set('expand', 'openapi-3.0')
+  params.append('endpoint_id', id)
+  return `${FAL_MODELS_URL}?${params.toString()}`
+}
+
+function reportGoneEndpoint(id: string, expandOpenApi: boolean): void {
+  const location = goneEndpointLocation(id, expandOpenApi)
+  console.error(
+    `fal ${id}: no longer served at ${location} (404 ${FAL_ENDPOINT_NOT_FOUND}); omitting the row so the poll deprecates it`,
+  )
 }
 
 /**
@@ -204,11 +248,13 @@ export async function fetchPageWithRetry(
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       })
       if (response.ok) return (await response.json()) as FalApiResponse
+      const body = await response.text()
       lastFailure = `${String(response.status)} ${response.statusText}`
       if (!RETRYABLE_STATUSES.has(response.status)) {
         throw new FalFetchError(
           `fal models fetch failed: ${lastFailure}`,
           response.status,
+          body,
         )
       }
       const retryAfter = Number(response.headers.get('retry-after'))
@@ -254,10 +300,52 @@ async function fetchFalModels(
 }
 
 /**
+ * Fetch by `endpoint_id`. A removed id 404s every filter it sits in, so
+ * split until that id is alone, log it, and return the rows FAL still
+ * serves. A 404 that is not {@link FAL_ENDPOINT_NOT_FOUND} still throws.
+ */
+async function fetchFalModelsAllowingGone(
+  apiKey: string,
+  expandOpenApi: boolean,
+  endpointIds: Array<string>,
+): Promise<{ models: Array<FalApiModel>; gone: Array<string> }> {
+  try {
+    return {
+      models: await fetchFalModels(apiKey, expandOpenApi, endpointIds),
+      gone: [],
+    }
+  } catch (error) {
+    if (!falEndpointGone(error) || endpointIds.length === 0) throw error
+    if (endpointIds.length === 1) {
+      const only = endpointIds[0]
+      if (only === undefined) throw error
+      reportGoneEndpoint(only, expandOpenApi)
+      return { models: [], gone: [only] }
+    }
+    const mid = Math.ceil(endpointIds.length / 2)
+    const left = await fetchFalModelsAllowingGone(
+      apiKey,
+      expandOpenApi,
+      endpointIds.slice(0, mid),
+    )
+    const right = await fetchFalModelsAllowingGone(
+      apiKey,
+      expandOpenApi,
+      endpointIds.slice(mid),
+    )
+    return {
+      models: [...left.models, ...right.models],
+      gone: [...left.gone, ...right.gone],
+    }
+  }
+}
+
+/**
  * Append {@link FAL_UNLISTED_ENDPOINT_IDS} that the active crawl did not
- * return. Only a 404 (the id is gone) is skipped, so the row is marked
- * removed. Any other failure throws: skipping it would also drop the row,
- * and the poller would emit a false `model.removed`.
+ * return. Only an id FAL reports as {@link FAL_ENDPOINT_NOT_FOUND} is
+ * skipped, so the row is marked removed. Any other failure throws:
+ * skipping it would also drop the row, and the poller would emit a false
+ * `model.removed`.
  */
 async function appendUnlistedFalModels(
   apiKey: string,
@@ -268,13 +356,11 @@ async function appendUnlistedFalModels(
   const extra: Array<FalApiModel> = []
   for (const id of FAL_UNLISTED_ENDPOINT_IDS) {
     if (seen.has(id)) continue
-    let page: Array<FalApiModel>
-    try {
-      page = await fetchFalModels(apiKey, expandOpenApi, [id])
-    } catch (error) {
-      if (error instanceof FalFetchError && error.status === 404) continue
-      throw error
-    }
+    const { models: page } = await fetchFalModelsAllowingGone(
+      apiKey,
+      expandOpenApi,
+      [id],
+    )
     const match = page.find((model) => model.endpoint_id === id)
     if (!match || seen.has(match.endpoint_id)) continue
     seen.add(match.endpoint_id)
@@ -546,37 +632,43 @@ async function listModels(
   })
   const chatIds = chat.map((m) => m.endpoint_id)
   const docs = docsRun()
+  // Ids the active search still returns but `endpoint_id` lookup 404s.
+  // Left out of the rows below, so the poll deprecates them.
+  const gone = new Set<string>()
   const chatFacts = await tryDocs(
     docs,
     `${FAL_MODELS_URL}?expand=openapi-3.0 (chat endpoints)`,
     async () => {
       const chatSpecs = new Map<string, OpenApiDocument | undefined>()
       for (let i = 0; i < chatIds.length; i += ENDPOINT_FILTER_MAX) {
-        const page = await fetchFalModels(
-          apiKey,
-          true,
-          chatIds.slice(i, i + ENDPOINT_FILTER_MAX),
-        )
+        const batch = chatIds.slice(i, i + ENDPOINT_FILTER_MAX)
+        const { models: page, gone: batchGone } =
+          await fetchFalModelsAllowingGone(apiKey, true, batch)
+        for (const id of batchGone) gone.add(id)
         for (const m of page) chatSpecs.set(m.endpoint_id, m.openapi)
       }
-      const unanswered = chatIds.filter((id) => !chatSpecs.has(id))
+      const unanswered = chatIds.filter(
+        (id) => !chatSpecs.has(id) && !gone.has(id),
+      )
       if (unanswered.length > 0) {
         throw new Error(
           `fal chat specs: models API left out ${unanswered.join(', ')}`,
         )
       }
       return new Map(
-        chat.map((m) => [
-          m.endpoint_id,
-          falChatFacts(
-            {
-              endpoint_id: m.endpoint_id,
-              description: m.metadata?.description,
-              openapi: chatSpecs.get(m.endpoint_id),
-            },
-            FAL_MODELS_URL,
-          ),
-        ]),
+        chat
+          .filter((m) => !gone.has(m.endpoint_id))
+          .map((m) => [
+            m.endpoint_id,
+            falChatFacts(
+              {
+                endpoint_id: m.endpoint_id,
+                description: m.metadata?.description,
+                openapi: chatSpecs.get(m.endpoint_id),
+              },
+              FAL_MODELS_URL,
+            ),
+          ]),
       )
     },
   )
@@ -588,11 +680,18 @@ async function listModels(
     'reasoning',
     'requestMap',
   )
-  const tokenPrices = await loadChatTokenPrices(chatIds, docs, kv)
+  const tokenPrices = await loadChatTokenPrices(
+    chatIds.filter((id) => !gone.has(id)),
+    docs,
+    kv,
+  )
   // After the chat spec request, so that request stays the second models
   // call. The lookup expands OpenAPI: unlisted rows carry no metadata, and
-  // the category is on the document.
-  const falModels = await appendUnlistedFalModels(apiKey, listedModels, true)
+  // the category is on the document. A chat id the filter proved gone is
+  // dropped here: the active search still listed it.
+  const falModels = (
+    await appendUnlistedFalModels(apiKey, listedModels, true)
+  ).filter((model) => !gone.has(model.endpoint_id))
   const models: Array<ModelInfo> = falModels.map((m) => {
     const facts = chatFacts?.get(m.endpoint_id)
     const price = tokenPrices.get(m.endpoint_id)

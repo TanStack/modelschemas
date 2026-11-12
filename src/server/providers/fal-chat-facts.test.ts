@@ -320,6 +320,15 @@ describe('fal listModels', () => {
     )
   }
 
+  function endpointNotFound(): Response {
+    return new Response(
+      JSON.stringify({
+        error: { type: 'not_found', message: 'Endpoint(s) not found' },
+      }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
   function respond(
     input: string,
     llms: (pathname: string) => string,
@@ -495,6 +504,35 @@ describe('fal listModels', () => {
   })
 
   it('skips fal-ai/whisper when the direct lookup 404s', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.stubGlobal('fetch', (input: string) => {
+      const url = new URL(input)
+      if (url.hostname === 'fal.ai')
+        return Promise.resolve(new Response(NO_TOKEN_PRICE))
+      if (url.searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+        return Promise.resolve(endpointNotFound())
+      }
+      return Promise.resolve(
+        url.searchParams.has('endpoint_id')
+          ? page(fixtures)
+          : page([image, ...listed]),
+      )
+    })
+    const { models } = await falProvider.listModels({ FAL_KEY: 'k' })
+    expect(models.some((model) => model.rawId === 'fal-ai/whisper')).toBe(false)
+    expect(models).toHaveLength(listed.length + 1)
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'fal-ai/whisper: no longer served at https://api.fal.ai/v1/models?',
+      ) as string,
+    )
+    const line = String(error.mock.calls[0]?.[0])
+    expect(line).toContain('endpoint_id=fal-ai%2Fwhisper')
+    expect(line).toContain('404 Endpoint(s) not found')
+    error.mockRestore()
+  })
+
+  it('fails the poll when an unlisted lookup 404s for another reason', async () => {
     vi.stubGlobal('fetch', (input: string) => {
       const url = new URL(input)
       if (url.hostname === 'fal.ai')
@@ -508,9 +546,85 @@ describe('fal listModels', () => {
           : page([image, ...listed]),
       )
     })
-    const { models } = await falProvider.listModels({ FAL_KEY: 'k' })
-    expect(models.some((model) => model.rawId === 'fal-ai/whisper')).toBe(false)
-    expect(models).toHaveLength(listed.length + 1)
+    await expect(falProvider.listModels({ FAL_KEY: 'k' })).rejects.toThrow(
+      'fal models fetch failed: 404',
+    )
+  })
+
+  it('omits a listed chat endpoint whose endpoint_id filter 404s', async () => {
+    const goneId = 'fal-ai/video-prompt-generator'
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.stubGlobal('fetch', (input: string) => {
+      const url = new URL(input)
+      if (url.hostname === 'fal.ai')
+        return Promise.resolve(new Response(NO_TOKEN_PRICE))
+      const ids = url.searchParams.getAll('endpoint_id')
+      if (ids.includes(goneId)) return Promise.resolve(endpointNotFound())
+      if (ids.length === 0) {
+        return Promise.resolve(
+          page([
+            image,
+            ...listed,
+            { endpoint_id: goneId, metadata: { category: 'llm' } },
+          ]),
+        )
+      }
+      if (ids.length === 1 && ids[0] === 'fal-ai/whisper') {
+        return Promise.resolve(page([]))
+      }
+      const wanted = new Set(ids)
+      return Promise.resolve(
+        page(fixtures.filter((model) => wanted.has(model.endpoint_id))),
+      )
+    })
+    const result = await falProvider.listModels({ FAL_KEY: 'k' })
+    expect(result.models.some((model) => model.rawId === goneId)).toBe(false)
+    expect(result.models).toHaveLength(listed.length + 1)
+    expect(result.docsFailures?.failed).toBe(0)
+    expect(
+      result.models.find(
+        (model) => model.rawId === 'fal-ai/bytedance/seed/v2/mini',
+      ),
+    ).toMatchObject({ activity: 'chat', contextWindow: 256_000 })
+    const line = error.mock.calls.map((call) => String(call[0])).join('\n')
+    expect(line).toContain(
+      `${goneId}: no longer served at https://api.fal.ai/v1/models?`,
+    )
+    expect(line).toContain('endpoint_id=fal-ai%2Fvideo-prompt-generator')
+    expect(line).toContain('expand=openapi-3.0')
+    expect(line).not.toContain('fal-ai/whisper')
+    error.mockRestore()
+  })
+
+  it('keeps the rows when a filtered 404 is not Endpoint(s) not found', async () => {
+    const goneId = 'fal-ai/video-prompt-generator'
+    vi.stubGlobal('fetch', (input: string) => {
+      const url = new URL(input)
+      if (url.hostname === 'fal.ai')
+        return Promise.resolve(new Response(NO_TOKEN_PRICE))
+      const ids = url.searchParams.getAll('endpoint_id')
+      if (ids.includes(goneId)) {
+        return Promise.resolve(new Response('nope', { status: 404 }))
+      }
+      if (ids.length === 1 && ids[0] === 'fal-ai/whisper') {
+        return Promise.resolve(page([]))
+      }
+      return Promise.resolve(
+        ids.length === 0
+          ? page([
+              image,
+              ...listed,
+              { endpoint_id: goneId, metadata: { category: 'llm' } },
+            ])
+          : page(fixtures),
+      )
+    })
+    const result = await falProvider.listModels({ FAL_KEY: 'k' })
+    expect(result.models.some((model) => model.rawId === goneId)).toBe(true)
+    expect(result.docsFailures?.first[0]?.error).toContain(
+      'fal models fetch failed: 404',
+    )
+    expect(result.models).toHaveLength(listed.length + 2)
   })
 
   it('marks an unlisted endpoint deprecated once retires_at is past', async () => {
