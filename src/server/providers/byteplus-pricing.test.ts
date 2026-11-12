@@ -19,6 +19,7 @@ import {
   sharePublishedAliases,
 } from './byteplus-pricing.ts'
 import type { ByteplusDoc } from './byteplus-pricing.ts'
+import liveImages from './fixtures/byteplus-pricing-images.json'
 import { pricingDoc } from './fixtures/byteplus-pricing-doc.ts'
 import type { PricingTable } from './fixtures/byteplus-pricing-doc.ts'
 import { overlayModelFacts } from './reasoning-config.ts'
@@ -583,7 +584,7 @@ const IMAGE_TABLE: PricingTable = {
     [
       'dola-seedream-5-0-pro-260628',
       'First image: Free From the second image: $0.003 Pricing varies by image generation scenario.',
-      'Single-image generation: Up to 2.61 million pixels (1.5K or lower): $0.045 More than 2.61 million pixels (higher than 1.5K): $0.09 Layer decomposition: Up to 2.61 million pixels (1.5K or lower): $0.0225 More than 2.61 million pixels (higher than 1.5K): $0.045',
+      'Single-image generation: P ≤ 2.61 million (1.5K or lower): $0.045 P > 2.61 million (higher than 1.5K): $0.09 Layer decomposition: P ≤ 2.61 million (1.5K or lower): $0.0225 P > 2.61 million (higher than 1.5K): $0.045',
     ],
     ['seedream-5-0-lite-260128', 'Free', '$0.035'],
     ['dola-seedream-5-0-flash-260915', 'Free', '$0.018'],
@@ -761,6 +762,55 @@ describe('byteplus video and image tables', () => {
     expect(() => price(card, {}, { generated_images: 1 })).toThrow(
       /input_images/,
     )
+  })
+})
+
+describe('byteplus image table as published 2026-11-13 (#640)', () => {
+  // The image table cut verbatim from the live doc: the "Output image"
+  // header now carries a note line, and Seedream 5.0 pro's tiers read
+  // "P ≤ 2.61 million".
+  const page: ByteplusDoc = liveImages
+
+  it('reads the flat rows under the annotated header', () => {
+    expect(parseByteplusImages(page)).toEqual(
+      new Map([
+        ['dola-seedream-5-0-flash-260915', 0.018],
+        ['seedream-5-0-lite-260128', 0.035],
+        ['seedream-4-5-251128', 0.04],
+        ['seedream-4-0-250828', 0.03],
+        ['seededit-3-0-i2i-250628', 0.03],
+      ]),
+    )
+  })
+
+  it('reads Seedream 5.0 pro tiers and leaves Seedream 5.5 unpriced', () => {
+    expect(parseByteplusPixelTiers(page)).toEqual(
+      new Map([
+        [
+          'dola-seedream-5-0-pro-260628',
+          {
+            extraInput: 0.003,
+            maxLowPixels: 2.61e6,
+            lowLevel: '1.5K',
+            low: 0.045,
+            high: 0.09,
+          },
+        ],
+      ]),
+    )
+  })
+
+  it('still parses nothing from a table with no output column', () => {
+    const none = pricingDoc([
+      {
+        rows: [
+          ['Model ID', 'Input image'],
+          ['seedream-4-0-250828', 'Free'],
+        ],
+      },
+    ])
+    expect(parseByteplusImages(none).size).toBe(0)
+    expect(parseByteplusPixelTiers(none).size).toBe(0)
   })
 })
 
