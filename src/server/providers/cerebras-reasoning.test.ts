@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -7,18 +9,29 @@ import {
   parseCerebrasReasoning,
 } from './cerebras-reasoning.ts'
 
-/** Rows from https://inference-docs.cerebras.ai/capabilities/reasoning.md */
-const REASONING = `
-| Model | Default | \`reasoning_effort\` | Disable reasoning | Availability |
-| - | - | - | - | - |
-| [\`qwen-3.8-27b\`](/models/qwen-3.8-27b) | \`high\` | \`none\`, \`low\`, \`medium\`, \`high\` | Set \`reasoning_effort\` to \`none\` | Shared Inference |
-| \`kimi-k2.7-code\` | Always enabled | Accepted but ignored | Not supported | Customer trials only |
-| [\`gpt-oss-120b\`](/models/openai-oss) | \`medium\` | \`low\`, \`medium\`, \`high\` | Not supported | Shared Inference |
-| [\`gemma-4-31b\`](/dedicated/overview#supported-models) | Disabled | \`none\`, \`low\`, \`medium\`, \`high\` | Set \`reasoning_effort\` to \`none\` | Dedicated Inference |
+/** https://inference-docs.cerebras.ai/capabilities/reasoning.md on 2026-11-13. */
+const REASONING = readFileSync(
+  new URL('./fixtures/cerebras-reasoning.md.txt', import.meta.url),
+  'utf8',
+)
 
-| Model | Default response behavior | \`raw\` | \`hidden\` |
-| - | - | - | - |
-| \`qwen-3.8-27b\` | Reasoning returned separately | Does not change the separated response format | Not supported |
+/** One model whose section never says whether reasoning can be turned off. */
+const UNSTATED = `
+| Model | Default effort | Availability |
+| - | - | - |
+| [GPT OSS 120B](#gpt-oss-120b) | \`medium\` | Shared |
+
+## Model behavior
+
+### GPT OSS 120B
+
+[\`gpt-oss-120b\`](/models/openai-oss) supports reasoning.
+
+| Value | Behavior |
+| - | - |
+| \`low\` | Selects low reasoning effort |
+| \`medium\` (default) | Selects medium reasoning effort |
+| \`high\` | Selects high reasoning effort |
 `
 
 /** The chat-spec sentences the request map is allowed to trust. */
@@ -39,32 +52,74 @@ const SPEC = `
         A message in the conversation. Developer messages are supported only by \`gpt-oss-120b\`.
 `
 
-describe('cerebras reasoning table', () => {
+describe('cerebras reasoning page', () => {
   const parsed = parseCerebrasReasoning(REASONING)
 
-  it('reads effort lists and whether reasoning can be disabled', () => {
+  it('reads each model section for efforts and whether reasoning can be disabled', () => {
     expect(parsed.configured.get('qwen-3.8-27b')).toEqual({
       mode: 'effort',
       mandatory: false,
       efforts: ['none', 'low', 'medium', 'high'],
+    })
+    expect(parsed.configured.get('kimi-k3')).toEqual({
+      mode: 'effort',
+      mandatory: true,
+      efforts: ['low', 'high', 'max'],
+    })
+    expect(parsed.configured.get('kimi-k3.1-pro')).toEqual({
+      mode: 'effort',
+      mandatory: true,
+      efforts: ['low', 'medium', 'high', 'max'],
+    })
+    expect(parsed.configured.get('zai-glm-5.3-flash')).toEqual({
+      mode: 'effort',
+      mandatory: true,
+      efforts: ['low', 'high', 'max'],
     })
     expect(parsed.configured.get('gpt-oss-120b')).toEqual({
       mode: 'effort',
       mandatory: true,
       efforts: ['low', 'medium', 'high'],
     })
-    expect(parsed.configured.get('gemma-4-31b')?.mandatory).toBe(false)
+    expect(parsed.configured.get('gemma-4-31b')).toEqual({
+      mode: 'effort',
+      mandatory: false,
+      efforts: ['none', 'low', 'medium', 'high'],
+    })
     expect(parsed.ignored).toEqual(['kimi-k2.7-code'])
+    expect([...parsed.configured.keys()]).toEqual([
+      'qwen-3.8-27b',
+      'kimi-k3',
+      'kimi-k3.1-pro',
+      'zai-glm-5.3-flash',
+      'gpt-oss-120b',
+      'gemma-4-31b',
+    ])
   })
 
-  it('throws when a disable cell is neither none nor not supported', () => {
+  it('throws when a behavior cell is not accept, disable, or unsupported', () => {
     expect(() =>
-      parseCerebrasReasoning(`
-| Model | Default | \`reasoning_effort\` | Disable reasoning | Availability |
-| - | - | - | - | - |
-| \`gpt-oss-120b\` | \`medium\` | \`low\`, \`high\` | Sometimes | Shared Inference |
-`),
-    ).toThrow(/unread disable cell/)
+      parseCerebrasReasoning(
+        REASONING.replace(
+          '| `medium` (default) | Selects medium reasoning effort |',
+          '| `medium` (default) | Sometimes |',
+        ),
+      ),
+    ).toThrow(/gpt-oss-120b unread behavior/)
+  })
+
+  it('throws when the section never says whether reasoning can be disabled', () => {
+    expect(() => parseCerebrasReasoning(UNSTATED)).toThrow(
+      /does not state whether reasoning can be disabled/,
+    )
+  })
+
+  it('throws when the page has no model behavior section', () => {
+    expect(() =>
+      parseCerebrasReasoning(
+        REASONING.replace('## Model behavior', '## Notes'),
+      ),
+    ).toThrow(/no model behavior section/)
   })
 })
 
