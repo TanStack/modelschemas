@@ -87,7 +87,7 @@ describe('fetchPageWithRetry', () => {
   })
 
   it('gives up after the attempt budget with the last failure in the message', async () => {
-    fetchMock.mockResolvedValue(errorResponse(429))
+    fetchMock.mockImplementation(() => Promise.resolve(errorResponse(429)))
     await expect(
       withTimersFlushed(fetchPageWithRetry('https://x', 'key', 3)),
     ).rejects.toThrow('fal models fetch failed after 3 attempts: 429')
@@ -351,6 +351,34 @@ describe('fal AsyncAPI discovery', () => {
     expect(post?.[FAL_ACTIVITY_MARKER]).toBe('audio')
     expect(fetched.specs).toHaveLength(2)
     expect(fetched.asyncApiRawIds).toEqual([])
+  })
+
+  it('throws when the unlisted lookup 404s without Endpoint(s) not found', async () => {
+    fetchMock.mockImplementation((input) => {
+      const url = requestUrl(input)
+      if (url.startsWith('https://api.fal.ai/v1/models')) {
+        if (new URL(url).searchParams.get('endpoint_id') === 'fal-ai/whisper') {
+          return Promise.resolve(new Response('missing', { status: 404 }))
+        }
+        return Promise.resolve(
+          jsonBody({
+            models: [
+              {
+                endpoint_id: 'fal-ai/flux/dev',
+                openapi: FLUX_OPENAPI,
+                metadata: { category: 'text-to-image' },
+              },
+            ],
+            has_more: false,
+            next_cursor: null,
+          }),
+        )
+      }
+      return Promise.resolve(new Response('nope', { status: 404 }))
+    })
+    await expect(
+      falProvider.fetchSpec({ FAL_KEY: 'test-key' }),
+    ).rejects.toThrow('404')
   })
 
   it('throws when the unlisted lookup fails with anything but 404', async () => {
