@@ -7,9 +7,9 @@ request/response JSON Schemas and model metadata for AI providers
 > The published bin is built JavaScript and runs on Node. No TypeScript loader.
 
 ```bash
-bunx modelschemas models list --activity chat
-bunx modelschemas schema get anthropic v1/messages --kind input
-bunx modelschemas validate anthropic/v1/messages payload.json
+npx modelschemas models list --activity chat
+npx modelschemas schema get anthropic v1/messages --kind input
+npx modelschemas validate anthropic/v1/messages payload.json
 ```
 
 ```

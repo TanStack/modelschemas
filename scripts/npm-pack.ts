@@ -1,15 +1,13 @@
 /**
  * Pack the public workspace packages for npm.
  *
- * Bun's packer rewrites `workspace:*` to the concrete versions npm
- * consumers need. This script only writes tarballs. Staging is
- * `npm stage publish` from `.github/workflows/publish.yml` (OIDC, env
- * `npm`, workflow filename `publish.yml`) so the trusted-publisher
- * match holds. Future Actions stages get provenance; laptop `0.1.0`
- * did not.
+ * This script only writes tarballs. Staging is `npm stage publish`
+ * from `.github/workflows/publish.yml` (OIDC, env `npm`, workflow
+ * filename `publish.yml`) so the trusted-publisher match holds.
+ * Future Actions stages get provenance; laptop `0.1.0` did not.
  *
- *   bun scripts/npm-pack.ts                  # dist/npm, then stop
- *   bun scripts/npm-pack.ts --pack-dir /tmp/npm
+ *   pnpm run npm:pack                        # dist/npm, then stop
+ *   pnpm run npm:pack -- --pack-dir /tmp/npm
  *
  * If `--tag` or `RELEASE_TAG` is set, it must be `vMAJOR.MINOR.PATCH`
  * (optional prerelease) and match every public package's version.
@@ -17,10 +15,9 @@
  * A package with a `build` script is built first. A package whose
  * `publishConfig` names entry points (rate-card: `dist/` JS and .d.ts
  * instead of `src/` TypeScript) is packed from a staged copy with those
- * fields lifted onto the manifest, because `bun pm pack` does not apply
- * them. Staging leaves the workspace, so `workspace:*` is pinned to
- * that package's version before `bun pm pack`. Every tarball must
- * contain each file its manifest points at.
+ * fields lifted onto the manifest. Staging leaves the workspace, so
+ * `workspace:*` is pinned to that package's version before `npm pack`.
+ * Every tarball must contain each file its manifest points at.
  */
 import {
   cpSync,
@@ -166,7 +163,7 @@ export function packedEntryNames(tarball: string): Array<string> {
     .filter((line) => line.length > 0)
 }
 
-/** Absolute dest so `bun pm pack` (cwd = package dir) writes where we look. */
+/** Absolute dest so `npm pack` (cwd = package dir) writes where we look. */
 export function resolvePackDir(packDir: string): string {
   return resolve(packDir)
 }
@@ -204,7 +201,7 @@ const DEP_FIELDS = [
   'optionalDependencies',
 ] as const
 
-/** `workspace:*` → that package's version. Bun does this only inside the workspace. */
+/** `workspace:*` → that package's version. npm does not rewrite the protocol. */
 export function pinWorkspaceSpecs(
   manifest: Record<string, unknown>,
   packagesDir: string,
@@ -290,13 +287,12 @@ export function packPackage(pkg: PublicPackage, packDir: string): string {
     isRecord(manifest.scripts) &&
     typeof manifest.scripts.build === 'string'
   ) {
-    run('bun', ['run', 'build'], pkg.dir)
+    run('pnpm', ['run', 'build'], pkg.dir)
   }
   const published = publishManifest(manifest)
   let cwd = pkg.dir
   if (published) {
-    // Outside the workspace, so bun cannot rewrite `workspace:*` here.
-    // Pin those specs to the workspace package's version before packing.
+    // Outside the workspace. Pin `workspace:*` before packing.
     cwd = mkdtempSync(join(tmpdir(), 'npm-pack-'))
     cpSync(pkg.dir, cwd, {
       recursive: true,
@@ -310,14 +306,18 @@ export function packPackage(pkg: PublicPackage, packDir: string): string {
   }
   let stdout: string
   try {
-    stdout = run('bun', ['pm', 'pack', '--destination', dest, '--quiet'], cwd)
+    stdout = run(
+      'npm',
+      ['pack', '--ignore-scripts', '--pack-destination', dest],
+      cwd,
+    )
   } finally {
     if (cwd !== pkg.dir) rmSync(cwd, { recursive: true, force: true })
   }
   const tarball = join(dest, tarballFileName(pkg.name, pkg.version))
   if (!existsSync(tarball)) {
     throw new Error(
-      `expected ${tarball} after bun pm pack; stdout=${stdout.trim()}`,
+      `expected ${tarball} after npm pack; stdout=${stdout.trim()}`,
     )
   }
   return tarball

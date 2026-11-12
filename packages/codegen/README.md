@@ -10,7 +10,7 @@ build verification, and content-hash integrity checks.
 > Used by `@modelschemas/vite` and the `modelschemas` CLI.
 
 ```bash
-bun add @modelschemas/codegen
+pnpm add @modelschemas/codegen
 ```
 
 ```ts

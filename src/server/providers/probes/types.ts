@@ -3,7 +3,7 @@
  * One module per provider under this directory. Adapters bind a fact only
  * when a record names that exact model and route. A record older than
  * `PROBE_STALE_DAYS` is still served; `GET /v1/status` counts those as
- * `staleProbes`. Re-run with `bun scripts/probe.ts <provider> [--write]`.
+ * `staleProbes`. Re-run with `pnpm run probe -- <provider> [--write]`.
  * The script is not a cron and not a CI step.
  */
 export const PROBE_STALE_DAYS = 90

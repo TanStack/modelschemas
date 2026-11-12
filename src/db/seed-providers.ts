@@ -8,7 +8,7 @@ export type ProviderSeed = typeof providers.$inferInsert
  * Seed row for any registered provider: the hand-written row for the
  * original 8, `seedFromAdapter` for auto-registered adapters. Lets the
  * sync/poll engines upsert provider rows so a fresh adapter appears without
- * a manual `bun run seed` against prod. Null when no seed can be derived
+ * a manual `pnpm run seed` against prod. Null when no seed can be derived
  * (a config without specSourceUrl, e.g. a test stub) — callers skip the
  * upsert and rely on the row already existing.
  */

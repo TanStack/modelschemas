@@ -25,7 +25,7 @@ import { sourceSilentLedger } from '#/server/source-silent.ts'
 
 /**
  * The gap-report score (`#/lib/completeness.ts`) over the provider's live
- * chat models: `filled / needed`, the same number `bun run gap:report`
+ * chat models: `filled / needed`, the same number `pnpm run gap:report`
  * prints.
  */
 export interface Completeness {

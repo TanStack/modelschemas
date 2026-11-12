@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Public git mirror of the catalog (issue #343). Fetches
  * `GET /v1/admin/export`, writes one file per entity into a data repo
@@ -32,7 +32,7 @@
  * Self-contained (no repo imports): the data repo's workflow runs it from a
  * sparse checkout of this file (scripts/mirror/catalog-mirror.yml).
  *
- *   MODELSCHEMAS_ADMIN_KEY=… bun scripts/mirror-catalog.ts <data-repo-dir>
+ *   MODELSCHEMAS_ADMIN_KEY=… node scripts/mirror-catalog.ts <data-repo-dir>
  *   MODELSCHEMAS_URL defaults to https://modelschemas.openstory.workers.dev
  */
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -308,7 +308,7 @@ async function main() {
   const adminKey = process.env.MODELSCHEMAS_ADMIN_KEY
   if (!dir || !adminKey) {
     fail(
-      'usage: MODELSCHEMAS_ADMIN_KEY=… bun scripts/mirror-catalog.ts <data-repo-dir>',
+      'usage: MODELSCHEMAS_ADMIN_KEY=… node scripts/mirror-catalog.ts <data-repo-dir>',
     )
   }
   const base =

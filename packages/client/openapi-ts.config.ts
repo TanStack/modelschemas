@@ -1,8 +1,8 @@
 import { defineConfig } from '@hey-api/openapi-ts'
 
-// Generation input is the emitted spec at the repo root (bun run
-// openapi:emit). Output is committed; CI fails when it drifts from the spec
-// (bun run check:client).
+// Generation input is the emitted spec at the repo root (`pnpm run
+// openapi:emit`). Output is committed; CI fails when it drifts from the spec
+// (pnpm run check:client).
 export default defineConfig({
   input: '../../openapi.json',
   output: {

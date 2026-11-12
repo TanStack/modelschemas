@@ -4,7 +4,7 @@ import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { cloudflare } from '@cloudflare/vite-plugin'
 
-// Standalone by default: clone the repo, `bun run build && wrangler deploy`,
+// Standalone by default: clone the repo, `pnpm run build && wrangler deploy`,
 // and the app runs at the root of your own workers.dev subdomain. The
 // `modelschemas` Cloudflare environment (CLOUDFLARE_ENV=modelschemas, see
 // wrangler.jsonc) is how the canonical deployment mounts this example at

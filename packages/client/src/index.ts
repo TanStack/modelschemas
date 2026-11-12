@@ -2,7 +2,7 @@
  * @modelschemas/client — typed fetch client for the modelschemas service.
  *
  * Everything under ./generated is produced by @hey-api/openapi-ts from the
- * service's own openapi.json (bun run generate:client); this file is the
+ * service's own openapi.json (pnpm run generate:client); this file is the
  * hand-written entry adding pluggable auth and branded model ids.
  */
 import { createClient, createConfig } from './generated/client/index.js'

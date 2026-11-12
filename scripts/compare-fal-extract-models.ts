@@ -7,7 +7,7 @@
  * passes provider rates through, so the cost column matches what Unified
  * Billing would charge (before its 5% fee).
  *
- *   bun scripts/compare-fal-extract-models.ts [--leftovers 13] [--models a,b] [--cache file.json]
+ *   pnpm run compare-fal -- [--leftovers 13] [--models a,b] [--cache file.json]
  *
  * Ground truth: the hand-checked FAL cards in packages/rate-card/src/fixtures.
  * A fixture matches when the extracted card reproduces every one of the

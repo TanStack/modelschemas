@@ -1,7 +1,7 @@
 // Re-run one provider's probe records. Not for CI: it spends a key and
 // calls the provider. Never prints the key.
 //
-//   bun scripts/probe.ts <provider> [--write]
+//   pnpm run probe -- <provider> [--write]
 //
 // `--write` sets `verifiedAt` to today on records that still match.
 // A mismatch exits 1 and leaves the file alone.
@@ -32,7 +32,7 @@ const write = process.argv.includes('--write')
 const known = [...new Set(probeRecords.map((record) => record.provider))]
 if (!providerId || !known.includes(providerId) || providerId.startsWith('-')) {
   console.error(
-    `usage: bun scripts/probe.ts <provider> [--write]\nproviders: ${known.join(', ')}`,
+    `usage: pnpm run probe -- <provider> [--write]\nproviders: ${known.join(', ')}`,
   )
   process.exit(1)
 }

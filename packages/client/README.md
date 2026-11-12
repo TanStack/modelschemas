@@ -8,7 +8,7 @@ FAL), generated from the service's OpenAPI spec.
 > Ships built ESM (`.js` + `.d.ts`). Node loads it with no TypeScript loader.
 
 ```bash
-bun add @modelschemas/client
+pnpm add @modelschemas/client
 ```
 
 ```ts

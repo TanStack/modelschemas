@@ -1,7 +1,7 @@
 // Smoke test for @modelschemas/client against a running dev server (task
 // 7.4 acceptance): lists providers and fetches one schema, fully typed.
 //
-//   bun scripts/client-smoke.ts [baseUrl]
+//   pnpm run client-smoke [baseUrl]
 import {
   createModelschemasClient,
   getSchema,

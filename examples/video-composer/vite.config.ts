@@ -4,7 +4,7 @@ import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { cloudflare } from '@cloudflare/vite-plugin'
 
-// Standalone by default (`bun run deploy` → your own workers.dev, app at
+// Standalone by default (`pnpm run deploy` → your own workers.dev, app at
 // "/"); the modelschemas Cloudflare environment mounts this example at
 // modelschemas.com/examples/video-composer/ via a zone route — see
 // wrangler.jsonc. Router basepath and server-fn base derive from `base`.

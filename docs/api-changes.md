@@ -29,7 +29,7 @@ was a substring match over the stored JSON, so `?capability=text-to-image`
 
 Both need D1 migrations `0013` (columns) and `0014` (stored capability
 lists become maps; native objects move to `provider_metadata`). Migrate
-first, then deploy: `bun run deploy:ci` does both in that order.
+first, then deploy: `pnpm run deploy:ci` does both in that order.
 
 **Breaking (0.1.x):** `reasoning.mode` gains `toggle` (an on/off thinking
 switch and nothing else), and `reasoning.mandatory` is `boolean | null`.

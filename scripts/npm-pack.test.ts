@@ -360,7 +360,7 @@ void modelschemas
           name === 'modelschemas'
             ? join(root, 'node_modules', 'modelschemas')
             : join(root, 'node_modules', name)
-        const out = run('bunx', ['publint'], dir)
+        const out = run('pnpm', ['exec', 'publint'], dir)
         expect(out).not.toMatch(/error/i)
       }
     }, 60_000)

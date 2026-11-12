@@ -7,7 +7,7 @@ config({ path: ['.env.local', '.env'] })
 // needs the credentials. Schema changes go through generated migrations
 // that wrangler applies (never `drizzle-kit push`, which skips
 // d1_migrations):
-//   bun run db:generate && bun run db:migrate
+//   pnpm run db:generate && pnpm run db:migrate
 export default defineConfig({
   out: './drizzle',
   schema: './src/db/schema.ts',

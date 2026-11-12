@@ -1,6 +1,6 @@
 /**
  * Completeness: the share of the chat facts `@tanstack/ai-models` needs that
- * a provider's rows carry. The one definition behind `bun run gap:report`
+ * a provider's rows carry. The one definition behind `pnpm run gap:report`
  * (`scripts/gap-report.ts`) and `completeness` on `GET /v1/status`, so the
  * CLI and the site cannot disagree. No Node or Workers dependencies.
  *

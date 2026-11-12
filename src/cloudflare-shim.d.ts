@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/consistent-type-imports --
    global declaration file: a top-level import would turn it into a module */
 // Companion to the wrangler-generated worker-configuration.d.ts (env-only
-// mode — `bun run types`). Full runtime-type generation clashes with lib.dom
+// mode — `pnpm run types`). Full runtime-type generation clashes with lib.dom
 // in this single-tsconfig SSR app, so binding types are aliased from
 // @cloudflare/workers-types as type-only imports (no fetch/Response globals),
 // and the cloudflare:workers module is declared against the generated

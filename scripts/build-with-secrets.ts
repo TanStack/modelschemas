@@ -15,7 +15,7 @@ for (const name of [
 }
 
 console.log(`Building with public configuration from Doppler ${config}`)
-const result = spawnSync('bun', ['run', 'build'], {
+const result = spawnSync('pnpm', ['run', 'build'], {
   env: { ...process.env, ...buildEnv },
   stdio: 'inherit',
 })

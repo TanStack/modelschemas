@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  // Default environment: anyone can clone this example and `bun run deploy`
+  // Default environment: anyone can clone this example and `pnpm run deploy`
   // it to their own account — it runs at the root of their workers.dev
   // subdomain.
   "name": "schema-studio-example",

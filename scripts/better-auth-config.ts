@@ -1,4 +1,4 @@
-// CLI-only entry for `bunx @better-auth/cli generate --config` — gives the
+// CLI-only entry for `pnpm exec @better-auth/cli generate --config` — gives the
 // CLI an auth instance to introspect for schema generation without importing
 // `cloudflare:workers` (which only exists inside workerd). The db is never
 // queried during generation, so a stub is fine.

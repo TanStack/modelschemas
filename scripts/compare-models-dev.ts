@@ -6,11 +6,11 @@
  * or the source-silent ledger, and nothing under `src/server/ingest/` or
  * `src/server/providers/` may import this file (nor this file them).
  *
- *   bun run compare:models-dev                    # per-provider table
- *   bun run compare:models-dev --json             # everything, per model
- *   bun run compare:models-dev --provider grok    # where we are behind / disagree
- *   bun run compare:models-dev --ours a.json --theirs b.json   # saved inputs
- *   bun run compare:models-dev --check --min 0.9  # exit 1 below 90% parity
+ *   pnpm run compare:models-dev                         # per-provider table
+ *   pnpm run compare:models-dev -- --json               # everything, per model
+ *   pnpm run compare:models-dev -- --provider grok      # where we are behind / disagree
+ *   pnpm run compare:models-dev -- --ours a.json --theirs b.json   # saved inputs
+ *   pnpm run compare:models-dev -- --check --min 0.9    # exit 1 below 90% parity
  *
  * Two requests per run: `GET /v1/models` (anonymous prod is 60 requests an
  * hour, shared) and `GET https://models.dev/api.json`.

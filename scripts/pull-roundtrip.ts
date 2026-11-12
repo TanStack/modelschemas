@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * E2E roundtrip for Phase 12 (PLAN.md task 12.6): against a live service
  * (default the local dev server), prove the full build-time pull flow —
@@ -6,7 +6,7 @@
  * stale the manifest entry
  * and prove `update` (a full pull) rewrites exactly that file.
  *
- *   bun scripts/pull-roundtrip.ts [baseUrl]
+ *   pnpm run pull-roundtrip [baseUrl]
  */
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

@@ -1,0 +1,20 @@
+# pnpm 11 reads overrides and allowBuilds here, not from package.json.
+packages:
+  - 'packages/*'
+  - 'examples/*'
+
+overrides:
+  '@cloudflare/workers-types': ^5.20261019.1
+
+# Install scripts stay off unless listed. esbuild and lightningcss ship
+# their native binaries this way. workerd is the Workers vitest pool.
+# lefthook downloads its binary in postinstall.
+allowBuilds:
+  # Present in the tree. Their install scripts are not required to build or test.
+  '@google/genai': false
+  core-js: false
+  esbuild: true
+  lefthook: true
+  lightningcss: true
+  protobufjs: false
+  workerd: true

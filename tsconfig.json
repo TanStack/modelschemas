@@ -7,7 +7,7 @@
   ],
   // Examples are separate TS projects (each registers its own TanStack
   // router via the global Register interface, which must not merge with
-  // the root app's). `bun run typecheck` checks them via -p.
+  // the root app's). `pnpm run typecheck` checks them via -p.
   "exclude": ["node_modules", "dist", "packages/*/dist", "examples"],
 
   "compilerOptions": {
