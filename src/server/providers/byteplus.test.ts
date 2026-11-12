@@ -469,6 +469,44 @@ describe('byteplus pricing pages failing', () => {
   })
 })
 
+describe('byteplus ids the pricing page no longer names (#646)', () => {
+  // 2026-11-12: the page dropped its "Retiring models" tables. Eight listed
+  // ids (seed-1-8-251228, glm-4-7-251222, …) are named nowhere on it.
+  it('clears the price of an id the page does not name', async () => {
+    const { models } = await listWith({})
+    const row = (rawId: string) => models.find((m) => m.rawId === rawId)
+    expect(row('seed-1-8-251228')?.pricing).toBeFalsy()
+    expect(row('seed-1-8-251228')?.absent?.pricing).toBe('cleared')
+    expect(row('glm-4-7-251222')?.absent?.pricing).toBe('cleared')
+    // A priced row carries no reason.
+    expect(row('seed-2-0-pro-260328')?.absent?.pricing).toBeUndefined()
+  })
+
+  it('keeps the stored card of an id the page names but no table prices', async () => {
+    const unread = () =>
+      routerHtml(
+        pricingDoc([
+          ...PRICING_TABLES,
+          {
+            tab: 'Standard',
+            rows: [
+              PRICING_TABLES[0]?.rows[0] ?? [],
+              // A bracket this parser refuses, and an undated id.
+              ['', 'seed-1-8-251228', 'Peak', '$1', '$1', '$1', '$1'],
+              ['', 'glm-4-7', 'About 128', '$1', '$1', '$1', '$1'],
+            ],
+          },
+        ]),
+      )
+    const { models } = await listWith({ [BYTEPLUS_PRICING_URL]: unread })
+    for (const rawId of ['seed-1-8-251228', 'glm-4-7-251222']) {
+      const row = models.find((m) => m.rawId === rawId)
+      expect(row?.pricing).toBeFalsy()
+      expect(row?.absent?.pricing).toBeUndefined()
+    }
+  })
+})
+
 /** The doc center's client-render shell on the first fetch, then `page`. */
 function shellThen(page: () => string): () => string {
   const shell = readFileSync(

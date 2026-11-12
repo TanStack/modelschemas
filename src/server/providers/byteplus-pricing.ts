@@ -3,9 +3,15 @@
  * is a Lark document: `window._ROUTER_DATA` embeds `curDoc.Content`, and
  * each table is an `aceTable` of a row zone plus a column zone. Cell text
  * lives in a zone id `x{rowId}x{colId}`. Since 2026-10-23 (#462) most
- * tables sit in Standard/Flex/Batch or "Input without/with video" tabs and
- * in a folded "Retiring models" section, and merged cells are listed by
- * `mergeCellID` on their rows and columns.
+ * tables sit in Standard/Flex/Batch or "Input without/with video" tabs, and
+ * merged cells are listed by `mergeCellID` on their rows and columns. The
+ * folded "Retiring models" section was removed on 2026-11-12 (#646); a
+ * folded section is still read if one returns.
+ *
+ * A catalog id the page names nowhere is `cleared`: BytePlus publishes no
+ * price for it, so a stored card is nulled rather than served as current.
+ * An id the page names but no table prices (a row this parser cannot read)
+ * keeps its stored card and logs `pricing_lost`.
  *
  * Only Standard-tab tables are read: the chat tables (the ones that quote
  * cache storage per hour) and the Audio input tables, whose audio rates
@@ -888,6 +894,20 @@ export function parseByteplusImages(doc: ByteplusDoc): Map<string, number> {
   return out
 }
 
+/**
+ * Every model-id-shaped word in the page text: hyphenated lowercase with a
+ * digit. `byteplusRatesFor` over this set says whether the page still names
+ * a catalog id, whatever table, note, or unreadable row it sits in.
+ */
+export function byteplusNamedIds(doc: ByteplusDoc): Set<string> {
+  const text = Object.values(doc.data).map(zoneText).join('\n')
+  return new Set(
+    (text.match(/[a-z0-9]+(?:-[a-z0-9]+)+/g) ?? []).filter((id) =>
+      /\d/.test(id),
+    ),
+  )
+}
+
 /** A priced row this parser could not read: logged so drift is visible. */
 function warnUnread(table: string, id: string, row: Array<string>): void {
   console.warn(
@@ -1443,6 +1463,8 @@ interface CachedPricing {
   // Absent on entries cached before #102.
   pixelTiers?: Record<string, ByteplusPixelTiers>
   serverTools?: Record<string, Array<string>>
+  /** Ids the page text names (`byteplusNamedIds`). */
+  named: Array<string>
   hash: string
   extractedAt: string
 }
@@ -1511,7 +1533,11 @@ async function modelListContent(): Promise<string | null> {
   }
 }
 
-/** Card lookup by catalog id. Ids no table prices get nothing. */
+/**
+ * Card lookup by catalog id. An id the page does not name is `cleared`; an
+ * id it names but no table prices gets nothing (stored card kept,
+ * `pricing_lost`). The page failing to load or parse throws before either.
+ */
 export async function byteplusModelPricing(
   run: DocsRun,
   kv?: KVNamespace,
@@ -1545,6 +1571,7 @@ export async function byteplusModelPricing(
         images: Object.fromEntries(images),
         pixelTiers: Object.fromEntries(pixelTiers),
         serverTools: Object.fromEntries(parseByteplusServerTools(html)),
+        named: [...byteplusNamedIds(page)],
         hash: await sha256Text(listContent ? content + listContent : content),
         extractedAt: new Date().toISOString(),
       }
@@ -1564,6 +1591,7 @@ export async function byteplusModelPricing(
   const video = new Map(Object.entries(doc.video))
   const images = new Map(Object.entries(doc.images))
   const pixelTiers = new Map(Object.entries(doc.pixelTiers ?? {}))
+  const named = new Map(doc.named.map((id) => [id, true]))
   const source = {
     url: BYTEPLUS_PRICING_URL,
     hash: doc.hash,
@@ -1617,8 +1645,6 @@ export async function byteplusModelPricing(
     const tools = doc.serverTools?.[rawId]
     const own = byteplusRatesFor(rawId, pages)
     const page = own?.page ?? null
-    // Page failed this poll: keep the stored card (`tryDocs` counted it).
-    const lost = own && !page ? unavailable('pricing') : {}
     // A model with its own page is priced from it alone, never the pricing page.
     const pricing = !own
       ? card(rawId)
@@ -1639,6 +1665,14 @@ export async function byteplusModelPricing(
         ? tagDocsFacts({ serverTools: tools }, BYTEPLUS_PRICING_URL, doc.hash)
         : {}
     const factSources = { ...pricingFacts, ...toolFacts }
+    const lost: PricedFacts = own
+      ? // Page failed this poll: keep the stored card (`tryDocs` counted it).
+        page
+        ? {}
+        : unavailable('pricing')
+      : pricing || byteplusRatesFor(rawId, named)
+        ? {}
+        : { absent: { pricing: 'cleared' } }
     if (!pricing && !tools) return lost
     return {
       ...lost,
