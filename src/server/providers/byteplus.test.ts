@@ -630,8 +630,13 @@ describe('ark task_type → activity', () => {
       ]),
     ).toBe('chat')
     expect(arkTaskActivity(['ImageToVideo', 'TextToVideo'])).toBe('video')
+    expect(arkTaskActivity(['text_to_video', 'image_to_video'])).toBe('video')
     expect(arkTaskActivity(['MultimodalToVideo', 'VideoEditing'])).toBe('video')
+    expect(arkTaskActivity(['multimodal_to_video', 'video_editing'])).toBe(
+      'video',
+    )
     expect(arkTaskActivity(['ImageToImage', 'TextToImage'])).toBe('image')
+    expect(arkTaskActivity(['text_to_image', 'image_to_image'])).toBe('image')
     expect(
       arkTaskActivity([
         'ImageEmbedding',
@@ -639,7 +644,17 @@ describe('ark task_type → activity', () => {
         'TextEmbedding',
       ]),
     ).toBe('embeddings')
+    expect(arkTaskActivity(['image_embedding', 'text_embedding'])).toBe(
+      'embeddings',
+    )
     expect(arkTaskActivity(['SpeechToText'])).toBe('audio')
+    expect(
+      arkTaskActivity([
+        'text_generation',
+        'visual_question_answering',
+        'speech_to_text',
+      ]),
+    ).toBe('chat')
     // 3D-generation models report no task_type at all.
     expect(arkTaskActivity([])).toBeNull()
     expect(arkTaskActivity(undefined)).toBeNull()
@@ -814,6 +829,77 @@ describe('byteplus live models (ARK_API_KEY set)', () => {
     expect(ids).toContain('seedream-5-0-lite-260128')
     // A live row must not be duplicated by its curated twin.
     expect(ids.filter((id) => id === 'seed-2-0-lite-260428')).toHaveLength(1)
+  })
+
+  it('links image and video rows the listing no longer classifies', async () => {
+    const { result } = await withStubbedFetch(
+      {
+        data: [
+          {
+            id: 'dreamina-seedance-2-0-260128',
+            domain: 'VideoGeneration',
+            task_type: ['text_to_video', 'image_to_video'],
+            modalities: {
+              input_modalities: ['text', 'image', 'video', 'audio'],
+              output_modalities: ['video'],
+            },
+          },
+          {
+            id: 'dola-seedream-5-5-261028',
+            domain: 'ImageGeneration',
+            modalities: {},
+          },
+          { id: 'seedance-1-0-pro-250528', modalities: {} },
+          { id: 'seedream-4-0-20260415' },
+          {
+            id: 'seed-2-0-lite-260428',
+            task_type: [
+              'text_generation',
+              'visual_question_answering',
+              'speech_to_text',
+            ],
+            modalities: {
+              input_modalities: ['text', 'image', 'video', 'audio'],
+              output_modalities: ['text'],
+            },
+            features: { tools: { function_calling: true } },
+          },
+        ],
+      },
+      () => byteplusProvider.listModels({ ARK_API_KEY: 'ark-test' }),
+    )
+    const row = (rawId: string) => result.models.find((m) => m.rawId === rawId)
+    expect(row('dreamina-seedance-2-0-260128')).toMatchObject({
+      activity: 'video',
+      modalities: {
+        input: ['text', 'image', 'video', 'audio'],
+        output: ['video'],
+      },
+    })
+    // Domain states image generation; the listing states no modalities.
+    expect(row('dola-seedream-5-5-261028')).toMatchObject({
+      activity: 'image',
+      modalities: { output: ['image'] },
+    })
+    expect(row('dola-seedream-5-5-261028')?.modalities).toEqual({
+      output: ['image'],
+    })
+    // The curated catalog still names this id's input and output.
+    expect(row('seedance-1-0-pro-250528')).toMatchObject({
+      activity: 'video',
+      modalities: { input: ['text', 'image'], output: ['video'] },
+    })
+    // No task type, domain, or modalities. The id is a Seedream model.
+    expect(row('seedream-4-0-20260415')).toMatchObject({
+      activity: 'image',
+      modalities: { output: ['image'] },
+    })
+    expect(row('seedream-4-0-20260415')?.modalities).toEqual({
+      output: ['image'],
+    })
+    const seed = row('seed-2-0-lite-260428')
+    expect(seed?.activity).toBe('chat')
+    expect(seed?.capabilities).toEqual(['tools', 'tool_choice'])
   })
 })
 
