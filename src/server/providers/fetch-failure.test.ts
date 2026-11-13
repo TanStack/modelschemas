@@ -99,6 +99,33 @@ describe('fetch failure message', () => {
     )
   })
 
+  it('names the url and the timeout budget when the body read aborts', async () => {
+    const timeout = new DOMException(
+      'The operation was aborted due to timeout',
+      'TimeoutError',
+    )
+    const stalled = () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.error(timeout)
+          },
+        }),
+        { status: 200, statusText: 'OK' },
+      )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(stalled())),
+    )
+
+    await expect(
+      fetchText(LISTING_URL, { signal: timeoutSignal(20_000) }),
+    ).rejects.toThrow(`fetch failed: ${LISTING_URL} → timeout after 20000ms`)
+    await expect(fetchJson(LISTING_URL)).rejects.toThrow(
+      `fetch failed: ${LISTING_URL} → timeout`,
+    )
+  })
+
   it('leaves a non-timeout rejection unchanged', async () => {
     const fetcher = () => Promise.reject(new TypeError('getaddrinfo ENOTFOUND'))
 

@@ -26,6 +26,7 @@ import {
   fetchText,
   sha256Text,
   timeoutSignal,
+  withFetchTimeout,
 } from '../types.ts'
 import type {
   FactSource,
@@ -182,9 +183,8 @@ export function parseMoonshotCnPricing(
  * cached doc, so a timeout fails the poll instead of going through `tryDocs`.
  */
 async function fetchPricingPage(): Promise<string> {
-  const response = await fetchResponse(MOONSHOT_CN_PRICING_URL, {
-    signal: timeoutSignal(FETCH_TIMEOUT_MS),
-  })
+  const signal = timeoutSignal(FETCH_TIMEOUT_MS)
+  const response = await fetchResponse(MOONSHOT_CN_PRICING_URL, { signal })
   if (!response.ok) {
     throw new Error(
       `fetch failed: ${MOONSHOT_CN_PRICING_URL} → ${String(response.status)} ${response.statusText}`,
@@ -194,7 +194,11 @@ async function fetchPricingPage(): Promise<string> {
   if (host !== new URL(MOONSHOT_CN_PRICING_URL).host) {
     throw new Error(`moonshotai-cn: pricing page was answered by ${host}`)
   }
-  return response.text()
+  // Headers can arrive inside the budget while the body is still reading
+  // when the signal fires. That abort is the same listing failure.
+  return withFetchTimeout(MOONSHOT_CN_PRICING_URL, signal, () =>
+    response.text(),
+  )
 }
 
 function deref(spec: OpenApiDocument, node: unknown, depth = 0): unknown {

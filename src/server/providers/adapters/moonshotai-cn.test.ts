@@ -422,6 +422,27 @@ describe('moonshotai-cn pricing page fetch', () => {
     )
   })
 
+  it('names the pricing url when the page body times out after the headers', async () => {
+    const timeout = new DOMException(
+      'The operation was aborted due to timeout',
+      'TimeoutError',
+    )
+    globalThis.fetch = () =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.error(timeout)
+            },
+          }),
+          { status: 200, statusText: 'OK' },
+        ),
+      )
+    await expect(provider.listModels({})).rejects.toThrow(
+      `fetch failed: ${MOONSHOT_CN_PRICING_URL} → timeout after 20000ms`,
+    )
+  })
+
   it('refuses a page answered by another host', async () => {
     const response = new Response(PRICING)
     Object.defineProperty(response, 'url', {
