@@ -2,7 +2,14 @@
 import { compileTokenCard } from '@modelschemas/rate-card'
 import type { RateCard } from '@modelschemas/rate-card'
 import { bearerConnect } from '../connect.ts'
-import { cachedDocs, tokenCount } from '../model-facts.ts'
+import {
+  cachedDocs,
+  docsReport,
+  docsRun,
+  tokenCount,
+  tryDocs,
+  unavailable,
+} from '../model-facts.ts'
 import { fetchText, sha256Text } from '../types.ts'
 import type { ModelInfo, ProviderConfig, FactSource } from '../types.ts'
 import {
@@ -208,8 +215,12 @@ export function multimodalModels(text: string): Set<string> {
   return supported
 }
 
-async function load(url: string, kv?: KVNamespace) {
-  return cachedDocs(kv, url, async () => {
+async function load(
+  url: string,
+  kv?: KVNamespace,
+  cached: typeof cachedDocs = cachedDocs,
+) {
+  return cached(kv, url, async () => {
     const text = await fetchText(url)
     return {
       text,
@@ -229,69 +240,92 @@ export const provider: ProviderConfig = {
   async listModels(_env, kv) {
     const chatUrl = XIAOMI_SCHEMA_URLS[0]
     if (!chatUrl) fail('missing chat schema source URL')
+    // The catalog is the listing. A docs page that 404s keeps the facts it
+    // supplies and the poll continues (`tryDocs`).
+    const docs = docsRun()
     const [catalog, pricing, thinking, chat] = await Promise.all([
       load(XIAOMI_MODELS, kv),
-      load(XIAOMI_PRICING, kv),
-      load(XIAOMI_THINKING, kv),
-      load(chatUrl, kv),
+      tryDocs(docs, XIAOMI_PRICING, async (cached) => {
+        const doc = await load(XIAOMI_PRICING, kv, cached)
+        return {
+          doc,
+          cards: parseXiaomiPricing(doc.text, {
+            url: XIAOMI_PRICING,
+            hash: doc.hash,
+            extractedAt: doc.extractedAt,
+          }),
+          free: new Set(
+            ids(
+              doc.text
+                .split('### Overseas Pricing of the Model')[1]
+                ?.split('### Pricing for Web Search Plugins')[0]
+                ?.split('Free for a limited time:')[1] ?? '',
+            ),
+          ),
+        }
+      }),
+      tryDocs(docs, XIAOMI_THINKING, async (cached) => {
+        const doc = await load(XIAOMI_THINKING, kv, cached)
+        return { doc, supported: thinkingModels(doc.text) }
+      }),
+      tryDocs(docs, chatUrl, async (cached) => {
+        const doc = await load(chatUrl, kv, cached)
+        return { doc, multimodal: multimodalModels(doc.text) }
+      }),
     ])
-    const cards = parseXiaomiPricing(pricing.text, {
-      url: XIAOMI_PRICING,
-      hash: pricing.hash,
-      extractedAt: pricing.extractedAt,
-    })
-    const supported = thinkingModels(thinking.text)
-    const multimodal = multimodalModels(chat.text)
-    const free = new Set(
-      ids(
-        pricing.text
-          .split('### Overseas Pricing of the Model')[1]
-          ?.split('### Pricing for Web Search Plugins')[0]
-          ?.split('Free for a limited time:')[1] ?? '',
-      ),
-    )
     const source: FactSource = {
       derivation: 'docs-derived',
       sourceUrl: XIAOMI_MODELS,
       sourceHash: catalog.hash,
     }
-    const modalitySource: FactSource = {
-      derivation: 'docs-derived',
-      sourceUrl: chatUrl,
-      sourceHash: chat.hash,
-    }
     return {
       models: parseXiaomiModels(catalog.text).map((model): ModelInfo => {
-        const modalities = multimodal.has(model.rawId)
+        const fromChat = chat?.multimodal.has(model.rawId) ?? false
+        const modalities = fromChat
           ? { input: ['text', 'image', 'audio', 'video'], output: ['text'] }
           : model.modalities
+        const card = pricing?.cards.get(model.rawId)
+        const thinks = thinking?.supported.has(model.rawId) ?? false
+        const absent = {
+          ...(pricing
+            ? pricing.free.has(model.rawId)
+              ? { pricing: 'cleared' as const }
+              : {}
+            : unavailable('pricing').absent),
+          ...(thinking ? {} : unavailable('reasoning').absent),
+          ...(chat ? {} : unavailable('modalities').absent),
+        }
         return {
           ...model,
-          pricing: cards.get(model.rawId) ?? null,
+          pricing: card ?? null,
           modalities,
-          ...(free.has(model.rawId)
-            ? { absent: { pricing: 'cleared' as const } }
-            : {}),
-          reasoning: supported.has(model.rawId)
+          ...(Object.keys(absent).length > 0 ? { absent } : {}),
+          reasoning: thinks
             ? { mode: 'toggle' as const, mandatory: false }
             : null,
           factSources: {
             contextWindow: source,
             maxOutput: source,
-            ...(cards.has(model.rawId)
+            ...(card && pricing
               ? {
                   pricing: {
                     derivation: 'docs-derived' as const,
                     sourceUrl: XIAOMI_PRICING,
-                    sourceHash: pricing.hash,
+                    sourceHash: pricing.doc.hash,
                     path: 'Overseas Pricing of the Model',
                   },
                 }
               : {}),
-            ...(modalities
+            // Chat docs name the multimodal rows. Speech modalities are on
+            // the catalog. A failed chat page states neither.
+            ...(chat && modalities
               ? {
-                  modalities: multimodal.has(model.rawId)
-                    ? modalitySource
+                  modalities: fromChat
+                    ? {
+                        derivation: 'docs-derived' as const,
+                        sourceUrl: chatUrl,
+                        sourceHash: chat.doc.hash,
+                      }
                     : source,
                 }
               : {}),
@@ -305,18 +339,19 @@ export const provider: ProviderConfig = {
                   ),
                 }
               : {}),
-            ...(supported.has(model.rawId)
+            ...(thinks && thinking
               ? {
                   reasoning: {
                     derivation: 'docs-derived' as const,
                     sourceUrl: XIAOMI_THINKING,
-                    sourceHash: thinking.hash,
+                    sourceHash: thinking.doc.hash,
                   },
                 }
               : {}),
           },
         }
       }),
+      docsFailures: docsReport(docs),
     }
   },
   async fetchSpec(_env) {

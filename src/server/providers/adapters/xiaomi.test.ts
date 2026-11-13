@@ -27,7 +27,7 @@ const pricingSource = {
   extractedAt: '2026-10-09T00:00:00Z',
 }
 afterEach(() => vi.unstubAllGlobals())
-function mockDocs(failedUrl?: string, modelDocument = catalog) {
+function mockDocs(failedUrl?: string, modelDocument = catalog, status = 503) {
   const requested: Array<string> = []
   vi.stubGlobal('fetch', (input: string | URL | Request) => {
     const url = requestUrl(input)
@@ -36,7 +36,10 @@ function mockDocs(failedUrl?: string, modelDocument = catalog) {
       throw new Error(`unexpected source ${url}`)
     return Promise.resolve(
       url === failedUrl
-        ? new Response('unavailable', { status: 503 })
+        ? new Response('unavailable', {
+            status,
+            ...(status === 404 ? { statusText: 'Not Found' } : {}),
+          })
         : new Response(
             url === XIAOMI_MODELS
               ? modelDocument
@@ -126,6 +129,61 @@ describe('Xiaomi native documentation', () => {
       listed.models.find((model) => model.rawId === 'mimo-v2.5-pro')
         ?.modalities,
     ).toBeNull()
+    expect(listed.docsFailures).toEqual({ failed: 0, skipped: 0, first: [] })
+  })
+
+  it('keeps every model when the chat docs page 404s', async () => {
+    const chatUrl = XIAOMI_SCHEMA_URLS[0]
+    if (!chatUrl) throw new Error('missing chat schema source URL')
+    mockDocs(chatUrl, catalog, 404)
+    const listed = await provider.listModels({})
+    expect(listed.models).toHaveLength(9)
+    for (const model of listed.models)
+      expect(model.absent?.modalities).toBe('unavailable')
+    expect(listed.docsFailures?.failed).toBe(1)
+    expect(listed.docsFailures?.first[0]?.source).toBe(chatUrl)
+    expect(listed.docsFailures?.first[0]?.error).toContain(chatUrl)
+    expect(listed.docsFailures?.first[0]?.error).toContain('404')
+    expect(
+      listed.models.find((model) => model.rawId === 'mimo-v2.6-pro'),
+    ).toMatchObject({
+      reasoning: { mode: 'toggle', mandatory: false },
+    })
+    expect(
+      listed.models.find((model) => model.rawId === 'mimo-v2.5-tts')?.absent
+        ?.pricing,
+    ).toBe('cleared')
+  })
+
+  it('does not clear prices when the pricing page 404s', async () => {
+    mockDocs(XIAOMI_PRICING, catalog, 404)
+    const listed = await provider.listModels({})
+    expect(listed.models).toHaveLength(9)
+    for (const model of listed.models)
+      expect(model.absent?.pricing).toBe('unavailable')
+    expect(
+      listed.models.find((model) => model.rawId === 'mimo-v2.5-tts')?.absent
+        ?.pricing,
+    ).toBe('unavailable')
+    expect(listed.docsFailures?.first[0]?.source).toBe(XIAOMI_PRICING)
+    expect(
+      listed.models.find((model) => model.rawId === 'mimo-v2.6-pro'),
+    ).toMatchObject({
+      reasoning: { mode: 'toggle', mandatory: false },
+      modalities: {
+        input: ['text', 'image', 'audio', 'video'],
+        output: ['text'],
+      },
+    })
+  })
+
+  it('keeps stored reasoning when the thinking page 404s', async () => {
+    mockDocs(XIAOMI_THINKING, catalog, 404)
+    const listed = await provider.listModels({})
+    expect(listed.models).toHaveLength(9)
+    for (const model of listed.models)
+      expect(model.absent?.reasoning).toBe('unavailable')
+    expect(listed.docsFailures?.first[0]?.source).toBe(XIAOMI_THINKING)
   })
 
   it('fails a fetch or malformed source rather than returning a successful empty listing', async () => {
