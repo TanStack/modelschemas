@@ -849,7 +849,7 @@ export async function fetchJson(
 ): Promise<unknown> {
   const response = await fetchResponse(url, init, fetcher)
   if (!response.ok) throw await fetchFailure(url, response)
-  return response.json()
+  return withFetchTimeout(url, init?.signal, () => response.json())
 }
 
 const timeoutBudgets = new WeakMap<AbortSignal, number>()
@@ -865,24 +865,39 @@ export function timeoutSignal(ms: number): AbortSignal {
 }
 
 /**
- * `fetch` that turns `AbortSignal` timeout into `fetch failed: <url> →
+ * Run `work`. An `AbortSignal` timeout becomes `fetch failed: <url> →
  * timeout after <budget>ms`. Any other rejection is rethrown as-is.
  * Does not retry.
+ *
+ * Headers can arrive inside the budget and the body read still aborts on
+ * the same signal. `response.text()` and `response.json()` go through
+ * here, same as the `fetch` that returned them.
+ */
+export async function withFetchTimeout<T>(
+  url: string,
+  signal: AbortSignal | null | undefined,
+  work: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await work()
+  } catch (error) {
+    if (!isFetchTimeout(error)) throw error
+    const budget = signal == null ? undefined : timeoutBudgets.get(signal)
+    const after = budget === undefined ? '' : ` after ${String(budget)}ms`
+    throw new Error(`fetch failed: ${url} → timeout${after}`, { cause: error })
+  }
+}
+
+/**
+ * `fetch` that names a timeout. The body read is separate: callers pass
+ * it through `withFetchTimeout` too. Does not retry.
  */
 export async function fetchResponse(
   url: string,
   init?: RequestInit,
   fetcher: Fetcher = fetch,
 ): Promise<Response> {
-  try {
-    return await fetcher(url, init)
-  } catch (error) {
-    if (!isFetchTimeout(error)) throw error
-    const budget =
-      init?.signal == null ? undefined : timeoutBudgets.get(init.signal)
-    const after = budget === undefined ? '' : ` after ${String(budget)}ms`
-    throw new Error(`fetch failed: ${url} → timeout${after}`, { cause: error })
-  }
+  return withFetchTimeout(url, init?.signal, () => fetcher(url, init))
 }
 
 /** AbortSignal.timeout's DOMException, including a cross-realm throw. */
@@ -957,7 +972,7 @@ export async function fetchText(
 ): Promise<string> {
   const response = await fetchResponse(url, init, fetcher)
   if (!response.ok) throw await fetchFailure(url, response)
-  return response.text()
+  return withFetchTimeout(url, init?.signal, () => response.text())
 }
 
 /**
