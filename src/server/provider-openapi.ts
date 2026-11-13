@@ -511,9 +511,16 @@ function schemaComponentKey(
   return unique
 }
 
-function withModelAnnotation(schema: unknown, rawId: string): unknown {
-  if (isObject(schema)) return { ...schema, 'x-modelschemas-model': rawId }
-  return { 'x-modelschemas-model': rawId, allOf: [schema] }
+function withModelAnnotation(
+  schema: unknown,
+  rawId: string,
+  transport?: 'realtime',
+): Record<string, unknown> {
+  const marked: Record<string, unknown> = isObject(schema)
+    ? { ...schema, 'x-modelschemas-model': rawId }
+    : { 'x-modelschemas-model': rawId, allOf: [schema] }
+  if (transport !== undefined) marked['x-modelschemas-transport'] = transport
+  return marked
 }
 
 function schemaUnion(
@@ -583,6 +590,7 @@ async function endpointOwners(
 function buildModelComponents(
   selected: Array<LoadedEndpoint>,
   owners: Map<string, string>,
+  transport?: 'realtime',
 ): { endpoints: Array<LoadedEndpoint>; schemas: Record<string, unknown> } {
   const used = new Set<string>()
   const schemas: Record<string, unknown> = {}
@@ -594,7 +602,7 @@ function buildModelComponents(
   ) => {
     if (schema === undefined) return undefined
     const name = schemaComponentKey(kind, endpoint.id, used)
-    schemas[name] = withModelAnnotation(schema, owner)
+    schemas[name] = withModelAnnotation(schema, owner, transport)
     return { $ref: `#/components/schemas/${name}` }
   }
   const typed = selected.map((endpoint) => {
@@ -1129,6 +1137,7 @@ export async function assembleProviderOpenApi(
 
   const config = getProvider(providerId)
   const grain = resolveSpecGrain(config)
+  const realtime = config?.realtimeCommands === true
 
   let pinnedModel: string | undefined
   if (query.model !== undefined) {
@@ -1185,8 +1194,10 @@ export async function assembleProviderOpenApi(
   const loaded = await loadEndpoints(db, providerId, activity, !lean)
   let selected = loaded
   if (pinnedModel !== undefined) {
-    const matching = loaded.filter((e) =>
-      endpointMatchesModel(e.id, e.path, pinnedModel),
+    const matching = loaded.filter(
+      (e) =>
+        endpointMatchesModel(e.id, e.path, pinnedModel) ||
+        (realtime && e.path.startsWith(`/${pinnedModel}/`)),
     )
     if (matching.length > 0) selected = matching
     else if (grain === 'model') {
@@ -1201,11 +1212,12 @@ export async function assembleProviderOpenApi(
     selected = selectQueueEndpoints(loaded, queueRawIds)
   }
 
-  // A model-grained provider without a queue (Reactor) keeps one path per
-  // endpoint; each body becomes an `input_`/`output_` component tagged with
-  // the model that owns the path.
+  // A model-grained provider without a queue keeps one component pair per
+  // endpoint, tagged with the model that owns the path. Realtime commands
+  // (Reactor) stay components on a pinned document too: they are not HTTP
+  // paths, so inlining them onto `connect.servers` would publish 404s.
   let owners: Map<string, string> | undefined
-  if (grain === 'model' && pinnedModel === undefined && !queue) {
+  if (grain === 'model' && !queue && (pinnedModel === undefined || realtime)) {
     owners = await endpointOwners(db, providerId, selected)
     if (!owners) return refuseModelGrained(providerId, loaded.length)
   }
@@ -1260,7 +1272,13 @@ export async function assembleProviderOpenApi(
     Object.assign(paths, built.paths)
     queueSchemas = built.schemas
   } else {
-    const built = owners ? buildModelComponents(selected, owners) : undefined
+    const built = owners
+      ? buildModelComponents(
+          selected,
+          owners,
+          realtime ? 'realtime' : undefined,
+        )
+      : undefined
     if (built) queueSchemas = built.schemas
     const catalog =
       owners !== undefined ||
@@ -1293,20 +1311,26 @@ export async function assembleProviderOpenApi(
         : modelIds
     // An upstream `#stream` path key (Mistral) is the same URL. Twins are
     // built aside and merged into the base once their schemas are hoisted.
-    for (const endpoint of built?.endpoints ?? selected) {
-      const path = endpoint.path.split('#')[0] ?? endpoint.path
-      const target = path === endpoint.path ? paths : twinPaths
-      const owner = owners?.get(endpoint.id)
-      for (const op of operationsFor(
-        providerId,
-        { ...endpoint, path },
-        connect,
-        owner !== undefined ? [owner] : idsFor(endpoint.id),
-        pinnedModel,
-      )) {
-        const item = target[op.path] ?? {}
-        item[op.method] = op.operation
-        target[op.path] = item
+    // Realtime commands are the component schemas above. Paths are the
+    // provider's platform HTTP operations (Reactor POST /tokens).
+    if (realtime) {
+      Object.assign(paths, config.platformOperations?.(pinnedModel) ?? {})
+    } else {
+      for (const endpoint of built?.endpoints ?? selected) {
+        const path = endpoint.path.split('#')[0] ?? endpoint.path
+        const target = path === endpoint.path ? paths : twinPaths
+        const owner = owners?.get(endpoint.id)
+        for (const op of operationsFor(
+          providerId,
+          { ...endpoint, path },
+          connect,
+          owner !== undefined ? [owner] : idsFor(endpoint.id),
+          pinnedModel,
+        )) {
+          const item = target[op.path] ?? {}
+          item[op.method] = op.operation
+          target[op.path] = item
+        }
       }
     }
   }
@@ -1349,7 +1373,9 @@ export async function assembleProviderOpenApi(
       title: `${config?.displayName ?? providerId} (modelschemas)`,
       version: revision,
       description: owners
-        ? `Generation-only OpenAPI assembled by modelschemas from stored endpoint schemas. Call this provider directly with your own key — this is not a proxy. One path per endpoint; each body is a component schema (input_/output_) tagged with its model (x-modelschemas-model).`
+        ? realtime
+          ? `Generation-only OpenAPI assembled by modelschemas from stored endpoint schemas. Call this provider directly with your own key — this is not a proxy. HTTP paths are platform operations only. Model commands are not HTTP: each body is a component schema (input_/output_) tagged with its model (x-modelschemas-model) and x-modelschemas-transport: realtime.`
+          : `Generation-only OpenAPI assembled by modelschemas from stored endpoint schemas. Call this provider directly with your own key — this is not a proxy. One path per endpoint; each body is a component schema (input_/output_) tagged with its model (x-modelschemas-model).`
         : queue
           ? `Generation-only OpenAPI assembled by modelschemas from stored endpoint schemas. Call this provider directly with your own key — this is not a proxy. One queue client: endpoint_id is the model raw id${lean ? "; bodies are untyped here, pass ?activity= to inline each model's own schema" : ", and each component schema is that model's own body (x-modelschemas-model)"}.`
           : `Generation-only OpenAPI assembled by modelschemas from live endpoint schemas. Call this provider directly with your own key — this is not a proxy.`,

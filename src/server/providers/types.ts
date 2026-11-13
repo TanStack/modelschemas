@@ -762,6 +762,21 @@ export interface ProviderConfig {
    * activities from the default document.
    */
   connectByActivity?: Partial<Record<Activity, ProviderConnect>>
+  /**
+   * Stored endpoints are realtime commands, not HTTP on `connect.servers`.
+   * `GET /v1/openapi/{id}` keeps their schemas as components tagged
+   * `x-modelschemas-transport: realtime` and publishes
+   * {@link platformOperations} as the only paths.
+   */
+  realtimeCommands?: true
+  /**
+   * HTTP operations that are not model commands (Reactor `POST /tokens`).
+   * Added to every assembled document when {@link realtimeCommands} is set.
+   * `pinnedModel` is the `?model=` raw id, when the caller passed one.
+   */
+  platformOperations?: (
+    pinnedModel: string | undefined,
+  ) => Record<string, Record<string, OpenApiOperation>>
   /** Fetch + parse the provider's OpenAPI spec document(s). */
   fetchSpec: (env: ProviderEnvironment) => Promise<SpecFetchResult>
   /** List currently served models from the provider's cheap models endpoint. */

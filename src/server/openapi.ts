@@ -588,7 +588,7 @@ export const openApiDocument = {
           'Assembled from classified endpoints plus the provider connect profile (servers, auth, required headers). ' +
           'Not a raw upstream-spec mirror. FAL (model-grained, queue) is one document: POST /{endpoint_id} and GET /{endpoint_id}/requests/{request_id}. endpoint_id is the model raw id (x-modelschemas-encode raw: do not percent-encode slashes). ' +
           "With no selector the bodies are untyped; ?activity= narrows the enum and inlines each model's own body schema (x-modelschemas-model), up to 1024 models; ?model= is that one model's paths. " +
-          'Other model-grained providers (Reactor) keep one path per endpoint; bare or with ?activity=, each body is an input_/output_ component schema tagged x-modelschemas-model. ' +
+          'Reactor publishes platform HTTP only (POST /tokens, Reactor-API-Key). Model commands stay component schemas tagged x-modelschemas-model and x-modelschemas-transport: realtime, not paths on the API host. ' +
           'A filter that matches no endpoint returns 400 spec_requires_selector; there is no cap on the number of paths in a provider-grained document. ' +
           'An unsynced provider returns 404 no_endpoints. ?model= pins the live model enum on provider-grained specs; it does not drop endpoints.',
         parameters: [
