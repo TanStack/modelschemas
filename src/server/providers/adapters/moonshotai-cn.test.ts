@@ -2,7 +2,7 @@ import { KIMI_CN_THINKING_URL } from '../provider-replay.ts'
 import { KIMI_REPLAY_FIXTURE } from '../fixtures/provider-replay.ts'
 import { readFileSync } from 'node:fs'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { modelBranchSchemas, walkRequestSchema } from '../fact-sources.ts'
 import specFixture from '../fixtures/moonshotai-cn-openapi.json' with { type: 'json' }
@@ -418,7 +418,7 @@ describe('moonshotai-cn pricing page fetch', () => {
         ),
       )
     await expect(provider.listModels({})).rejects.toThrow(
-      `fetch failed: ${MOONSHOT_CN_PRICING_URL} → timeout after 20000ms`,
+      `fetch failed: ${MOONSHOT_CN_PRICING_URL} → timeout after 45000ms`,
     )
   })
 
@@ -439,8 +439,26 @@ describe('moonshotai-cn pricing page fetch', () => {
         ),
       )
     await expect(provider.listModels({})).rejects.toThrow(
-      `fetch failed: ${MOONSHOT_CN_PRICING_URL} → timeout after 20000ms`,
+      `fetch failed: ${MOONSHOT_CN_PRICING_URL} → timeout after 45000ms`,
     )
+  })
+
+  it('gives the pricing page its own budget, longer than the spec fetch', async () => {
+    const budgets: Array<number> = []
+    const spy = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms: number) => {
+        budgets.push(ms)
+        return new AbortController().signal
+      })
+    stubFetch(JSON.stringify(SPEC))
+    try {
+      await provider.listModels({})
+    } finally {
+      spy.mockRestore()
+    }
+    expect(budgets[0]).toBe(45_000)
+    expect(budgets[1]).toBe(20_000)
   })
 
   it('refuses a page answered by another host', async () => {
