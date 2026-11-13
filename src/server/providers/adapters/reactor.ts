@@ -13,8 +13,13 @@
  * pulls those pages, extracts the document, and namespaces paths under the
  * connect slug so models do not collide. Catalog is public GET /pricing.
  *
- * Auth for live sessions is `Reactor-API-Key` (`rk_...`); browser clients
- * exchange it for a JWT via POST /tokens. Sync/poll stay keyless.
+ * Auth for live sessions is `Reactor-API-Key` (`rk_...`). The only HTTP
+ * call is POST /tokens, which mints the session JWT. Command paths in the
+ * extracted documents (`POST /events/<name>`) are `sendCommand` messages
+ * on the session channel: fetchSpec still stores their schemas, and the
+ * assembled document publishes them as components tagged
+ * `x-modelschemas-transport: realtime`, not as paths on api.reactor.inc.
+ * Sync/poll stay keyless.
  */
 import type { Activity } from '#/db/schema.ts'
 import { contentHash } from '#/server/kv.ts'
@@ -469,6 +474,182 @@ function catalogFromPricing(
   return models
 }
 
+function matchItem(pinnedModel: string | undefined): Schema {
+  return pinnedModel === undefined
+    ? {
+        type: 'string',
+        description:
+          'Connect slug (`reactor/helios`). No wildcard; list every model the token may start.',
+      }
+    : { type: 'string', enum: [pinnedModel] }
+}
+
+/** Request body for `POST /tokens`. Optional fields are the documented ones. */
+export function sessionTokenRequestSchema(pinnedModel?: string): Schema {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['authorization_details'],
+    properties: {
+      expires_after: {
+        type: 'integer',
+        minimum: 1,
+        description:
+          'Token lifetime in seconds. Session-scoped tokens default to 1 hour. Values at or above 21600 (6 hours) are clamped, and the response is still 200, so read expires_at.',
+      },
+      authorization_details: {
+        type: 'array',
+        minItems: 1,
+        description:
+          'Scope the token. Omitting this mints an unscoped token; the assembled operation requires it.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['type', 'resources'],
+          properties: {
+            type: {
+              type: 'string',
+              const: 'session',
+              description:
+                'The token can create sessions and do what those sessions need, and nothing else.',
+            },
+            resources: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['models'],
+              properties: {
+                models: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['match'],
+                  properties: {
+                    match: {
+                      type: 'array',
+                      minItems: 1,
+                      items: matchItem(pinnedModel),
+                      description:
+                        'Models the token may start sessions for. Every id must be visible to the API key.',
+                    },
+                  },
+                },
+                sessions: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['bind'],
+                  properties: {
+                    bind: {
+                      type: 'array',
+                      minItems: 1,
+                      items: { type: 'string' },
+                      description:
+                        'Open session ids, owned by this account, that this token did not create and may still act on.',
+                    },
+                  },
+                },
+              },
+            },
+            constraints: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                max_sessions: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: 500,
+                  description:
+                    'Sessions this token may create in total. Defaults to 5. Closing a session does not restore capacity.',
+                },
+                max_session_duration_seconds: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: 86400,
+                  description:
+                    'Cap every session this token creates, in seconds (24 hours). Omit for no token cap; an account maximum still applies.',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }
+}
+
+function sessionTokenResponseSchema(): Schema {
+  return {
+    type: 'object',
+    required: ['jwt', 'expires_at'],
+    properties: {
+      jwt: {
+        type: 'string',
+        description:
+          'Session JWT. Pass it to the JS SDK. Do not send the API key to the browser.',
+      },
+      expires_at: {
+        type: 'integer',
+        description:
+          'Unix epoch seconds when the JWT expires. The server clamps expires_after, so read this value.',
+      },
+    },
+  }
+}
+
+/**
+ * The one HTTP operation on `api.reactor.inc` that a Reactor integration
+ * calls. Command schemas stay out of `paths` (see `realtimeCommands`).
+ */
+export function reactorPlatformOperations(
+  pinnedModel: string | undefined,
+): Record<string, Record<string, OpenApiOperation>> {
+  return {
+    '/tokens': {
+      post: {
+        operationId: 'createSessionToken',
+        summary: 'Mint a session-scoped JWT',
+        description:
+          'Exchange a Reactor-API-Key for a short-lived session JWT. Send this from the server. Model commands are not HTTP on this host: their schemas are components tagged x-modelschemas-transport: realtime, and the JS SDK sends them on the session channel after connect() is ready. A missing key returns 401.',
+        parameters: [
+          {
+            name: 'Reactor-API-Key',
+            in: 'header',
+            required: true,
+            description: 'API key starting with `rk_`. Server-side only.',
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: sessionTokenRequestSchema(pinnedModel),
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Session JWT.',
+            content: {
+              'application/json': { schema: sessionTokenResponseSchema() },
+            },
+          },
+          '401': {
+            description: 'Missing or invalid Reactor-API-Key.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error'],
+                  properties: { error: { type: 'string' } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }
+}
+
 async function listModels(_env: ProviderSecrets): Promise<ListModelsResult> {
   try {
     const text = await fetchText(REACTOR_PRICING_URL)
@@ -506,6 +687,8 @@ export const provider: ProviderConfig = {
     },
     security: [{ apiKey: [] }],
   },
+  realtimeCommands: true,
+  platformOperations: reactorPlatformOperations,
   fetchSpec,
   listModels,
   classify,

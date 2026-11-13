@@ -1473,19 +1473,88 @@ describe('assembleProviderOpenApi', () => {
         paths: Record<string, unknown>
         components: { schemas: Record<string, Record<string, unknown>> }
       }
-      expect(Object.keys(doc.paths).sort()).toEqual(paths)
+      expect(Object.keys(doc.paths)).toEqual(['/tokens'])
+      for (const path of paths) expect(doc.paths[path]).toBeUndefined()
+      const tokens = doc.paths['/tokens'] as {
+        post?: {
+          operationId?: string
+          parameters?: Array<{ name?: string; in?: string; required?: boolean }>
+          requestBody?: {
+            content?: {
+              'application/json'?: {
+                schema?: { required?: Array<string> }
+              }
+            }
+          }
+          responses?: {
+            '200'?: {
+              content?: {
+                'application/json'?: {
+                  schema?: { required?: Array<string> }
+                }
+              }
+            }
+          }
+        }
+      }
+      expect(tokens.post?.operationId).toBe('createSessionToken')
+      expect(tokens.post?.parameters).toEqual([
+        expect.objectContaining({
+          name: 'Reactor-API-Key',
+          in: 'header',
+          required: true,
+        }),
+      ])
+      expect(
+        tokens.post?.requestBody?.content?.['application/json']?.schema
+          ?.required,
+      ).toEqual(['authorization_details'])
+      expect(
+        tokens.post?.responses?.['200']?.content?.['application/json']?.schema
+          ?.required,
+      ).toEqual(['jwt', 'expires_at'])
       const schemas = doc.components.schemas
       expect(schemas['input_reactor_helios_events_set_prompt']).toMatchObject({
         'x-modelschemas-model': 'reactor/helios',
+        'x-modelschemas-transport': 'realtime',
       })
       expect(
         schemas['output_reactor_lingbot-world-2_events_pause'],
-      ).toMatchObject({ 'x-modelschemas-model': 'reactor/lingbot-world-2' })
+      ).toMatchObject({
+        'x-modelschemas-model': 'reactor/lingbot-world-2',
+        'x-modelschemas-transport': 'realtime',
+      })
       expect(
         Object.keys(schemas).filter((key) => /^(input|output)_/.test(key)),
       ).toHaveLength(paths.length * 2)
+      expect(
+        (result.document as { info?: { description?: string } }).info
+          ?.description,
+      ).toContain('x-modelschemas-transport: realtime')
       expect(unresolvedRefs(result.document)).toEqual([])
     }
+
+    const pinned = await assembleProviderOpenApi(db, 'reactor', {
+      model: 'reactor/helios',
+    })
+    expect(pinned.ok).toBe(true)
+    if (!pinned.ok) return
+    const pinnedDoc = pinned.document as {
+      paths: Record<string, { post?: { requestBody?: unknown } }>
+      components: { schemas: Record<string, unknown> }
+    }
+    expect(Object.keys(pinnedDoc.paths)).toEqual(['/tokens'])
+    expect(JSON.stringify(pinnedDoc.paths['/tokens'])).toContain(
+      '"enum":["reactor/helios"]',
+    )
+    expect(
+      pinnedDoc.components.schemas['input_reactor_helios_events_set_prompt'],
+    ).toBeDefined()
+    expect(
+      pinnedDoc.components.schemas[
+        'input_reactor_lingbot-world-2_events_pause'
+      ],
+    ).toBeUndefined()
 
     await db
       .insert(endpoints)

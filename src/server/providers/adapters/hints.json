@@ -242,7 +242,7 @@
     "specUrl": "https://docs.reactor.inc",
     "modelsUrl": "https://api.reactor.inc/pricing",
     "activities": ["video"],
-    "notes": "No api.reactor.inc/openapi.json. Per-model OpenAPI 3.1 (POST /events/<command>) is compiled by the runtime and embedded in https://reactor.inc/models/{slug}/api; the JS SDK loads the same document via requestSchema() after a live session is ready. fetchSpec extracts those pages (keyless). Catalog is public GET /pricing. Auth for live sessions is Reactor-API-Key."
+    "notes": "No api.reactor.inc/openapi.json. Per-model OpenAPI 3.1 (POST /events/<command>) is compiled by the runtime and embedded in https://reactor.inc/models/{slug}/api; the JS SDK loads the same document via requestSchema() after a live session is ready. Those paths are realtime sendCommand messages, not HTTP. The HTTP call is POST /tokens (Reactor-API-Key), which mints the session JWT. fetchSpec extracts the model pages (keyless). Catalog is public GET /pricing."
   },
   "worldlabs": {
     "displayName": "World Labs",

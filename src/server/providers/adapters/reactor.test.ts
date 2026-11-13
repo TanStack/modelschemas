@@ -8,6 +8,8 @@ import {
   extractOpenApiFromHtml,
   modelApiPageUrl,
   provider,
+  reactorPlatformOperations,
+  sessionTokenRequestSchema,
 } from './reactor.ts'
 
 const MINI_SPEC = {
@@ -251,6 +253,44 @@ describe('reactor fetchSpec', () => {
     } finally {
       globalThis.fetch = original
     }
+  })
+})
+
+describe('reactor POST /tokens', () => {
+  it('documents the session JWT call and leaves command paths out of it', () => {
+    expect(provider.realtimeCommands).toBe(true)
+    const post = reactorPlatformOperations(undefined)['/tokens']?.post
+    if (!post) throw new Error('missing POST /tokens')
+    expect(post.parameters).toEqual([
+      expect.objectContaining({
+        name: 'Reactor-API-Key',
+        in: 'header',
+        required: true,
+      }),
+    ])
+    const body = sessionTokenRequestSchema()
+    expect(body.required).toEqual(['authorization_details'])
+    const details = (
+      body.properties as {
+        authorization_details: { items: { required: Array<string> } }
+      }
+    ).authorization_details
+    expect(details.items.required).toEqual(['type', 'resources'])
+    const response = (
+      post.responses as {
+        '200': {
+          content: {
+            'application/json': { schema: { required: Array<string> } }
+          }
+        }
+      }
+    )['200']
+    expect(response.content['application/json'].schema.required).toEqual([
+      'jwt',
+      'expires_at',
+    ])
+    const pinned = reactorPlatformOperations('reactor/helios')['/tokens']?.post
+    expect(JSON.stringify(pinned)).toContain('"enum":["reactor/helios"]')
   })
 })
 
