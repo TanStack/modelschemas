@@ -61,7 +61,20 @@ const CN_HOST: MoonshotHost = {
   specUrl: MOONSHOT_CN_OPENAPI_URL,
 }
 const CHAT_PATH = '/v1/chat/completions'
+/** Spec and other fetches. The pricing page, which is the model list, is slower. */
 const FETCH_TIMEOUT_MS = 20_000
+/**
+ * Ceiling for the pricing-page body (issue #651). Outside Cloudflare the
+ * page finishes in about 3s; from the Worker the body passes 20s on about
+ * 1 poll in 6. A healthy read returns when the body arrives, so the extra
+ * 25s is only that slow path, and a timeout still fails the poll.
+ *
+ * The models poll is one cron invocation for every provider: 15 min of
+ * wall time, and 30s of CPU because the trigger is under an hour. Waiting
+ * on fetch is not CPU. FAL already waits up to 60s on a fetch in that same
+ * invocation, so 45s for this one page fits.
+ */
+const PRICING_PAGE_TIMEOUT_MS = 45_000
 
 type Json = Record<string, unknown>
 
@@ -183,7 +196,7 @@ export function parseMoonshotCnPricing(
  * cached doc, so a timeout fails the poll instead of going through `tryDocs`.
  */
 async function fetchPricingPage(): Promise<string> {
-  const signal = timeoutSignal(FETCH_TIMEOUT_MS)
+  const signal = timeoutSignal(PRICING_PAGE_TIMEOUT_MS)
   const response = await fetchResponse(MOONSHOT_CN_PRICING_URL, { signal })
   if (!response.ok) {
     throw new Error(
