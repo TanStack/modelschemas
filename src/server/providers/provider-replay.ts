@@ -1,7 +1,7 @@
 /** Replay facts parsed from each host's own published documentation. */
 import { cachedDocs } from './model-facts.ts'
 import type { ChatRequestMap } from './request-map.ts'
-import { fetchText, sha256Text } from './types.ts'
+import { fetchText, sha256Text, timeoutSignal } from './types.ts'
 import type { FactSource, ModelInfo, ModelReasoning } from './types.ts'
 
 export const DEEPSEEK_THINKING_URL =
@@ -181,7 +181,7 @@ export async function loadReplayDoc(
   verify?: (text: string) => unknown,
 ): Promise<{ text: string; source: FactSource }> {
   const doc = await cached(kv, url, async () => {
-    const text = await fetchText(url, { signal: AbortSignal.timeout(30_000) })
+    const text = await fetchText(url, { signal: timeoutSignal(30_000) })
     if (
       /^\s*<(?:!doctype|html)/i.test(text) &&
       !url.includes('api-docs.deepseek.com')

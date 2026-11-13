@@ -21,7 +21,12 @@ import type { KimiDocTable } from '../kimi-doc-tables.ts'
 import { cachedDocs } from '../model-facts.ts'
 import { compatGenerationEndpointId } from '../model-meta.ts'
 import { REASONING_SOURCE_SILENT } from '../reasoning-config.ts'
-import { fetchText, sha256Text } from '../types.ts'
+import {
+  fetchResponse,
+  fetchText,
+  sha256Text,
+  timeoutSignal,
+} from '../types.ts'
 import type {
   FactSource,
   ListModelsResult,
@@ -172,10 +177,13 @@ export function parseMoonshotCnPricing(
 /**
  * The pricing page. platform.kimi.ai publishes the same path in USD, so a
  * redirect off the CN host would hand this provider the other's prices.
+ *
+ * This page is the model list: it is fetched on every poll and is not a
+ * cached doc, so a timeout fails the poll instead of going through `tryDocs`.
  */
 async function fetchPricingPage(): Promise<string> {
-  const response = await fetch(MOONSHOT_CN_PRICING_URL, {
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  const response = await fetchResponse(MOONSHOT_CN_PRICING_URL, {
+    signal: timeoutSignal(FETCH_TIMEOUT_MS),
   })
   if (!response.ok) {
     throw new Error(
@@ -361,7 +369,7 @@ export function moonshotCnChatFacts(
 
 async function fetchCnSpec(): Promise<{ spec: OpenApiDocument; hash: string }> {
   const text = await fetchText(MOONSHOT_CN_OPENAPI_URL, {
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    signal: timeoutSignal(FETCH_TIMEOUT_MS),
   })
   // An unknown docs path answers 200 with another page; JSON.parse throws on it.
   const spec = JSON.parse(text) as OpenApiDocument
