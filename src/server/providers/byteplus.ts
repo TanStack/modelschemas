@@ -29,11 +29,12 @@
  * 2. Seed Speech (TTS/ASR) lives on a different host entirely and appears in
  *    no Ark listing.
  *
- * So the live rows win where they exist and the curated entries fill the
- * gaps. With no key the provider still serves the curated catalog, and
- * reports that fallback on `docsFailures`, so a dropped secret is not a
- * healthy poll. A live response with no `data` array, or an empty one,
- * throws: the poll keeps the stored rows instead of writing the catalog.
+ * So the live rows win where they state a fact, and the curated entries
+ * fill the gaps, including activity and modalities on a live id whose
+ * listing names neither. With no key the provider still serves the curated
+ * catalog and reports that fallback on `docsFailures`, so a dropped secret
+ * is not a healthy poll. A live response with no `data` array, or an empty
+ * one, throws: the poll keeps the stored rows instead of writing the catalog.
  */
 import type { Activity } from '#/db/schema.ts'
 import { errorMessage } from '#/server/errors.ts'
@@ -347,6 +348,8 @@ function curatedModels(): Array<ModelInfo> {
   }))
 }
 
+const CURATED_BY_ID = new Map(BYTEPLUS_MODELS.map((m) => [m.rawId, m]))
+
 /**
  * Ark reports one or more `task_type`s per model. Highest-precedence match
  * wins: a chat model that also accepts audio input carries `SpeechToText`
@@ -354,6 +357,9 @@ function curatedModels(): Array<ModelInfo> {
  * `chat`, not `audio`, so the generation task types are checked first.
  * 3D-generation models carry no task_type at all and fall through to null —
  * the same treatment FAL's `text-to-3d` gets until the taxonomy grows.
+ *
+ * The listing used PascalCase (`TextToVideo`) through 2026-08 and now sends
+ * snake_case (`text_to_video`). Comparison ignores case and separators.
  */
 const ARK_TASK_ACTIVITIES: Array<[Activity, Array<string>]> = [
   [
@@ -372,13 +378,60 @@ const ARK_TASK_ACTIVITIES: Array<[Activity, Array<string>]> = [
   ['audio', ['SpeechToText', 'TextToSpeech']],
 ]
 
+function arkTaskKey(task: string): string {
+  return task.replace(/[_\s-]/g, '').toLowerCase()
+}
+
 export function arkTaskActivity(
   taskTypes: Array<string> | undefined,
 ): Activity | null {
   if (!taskTypes?.length) return null
+  const wanted = new Set(taskTypes.map(arkTaskKey))
   for (const [activity, types] of ARK_TASK_ACTIVITIES) {
-    if (taskTypes.some((t) => types.includes(t))) return activity
+    if (types.some((t) => wanted.has(arkTaskKey(t)))) return activity
   }
+  return null
+}
+
+/**
+ * `domain` when `task_type` is absent. LLM and VLM are not mapped: a chat
+ * row states a generation task type, and a domain alone does not.
+ */
+function arkDomainActivity(domain: string | undefined): Activity | null {
+  switch (domain) {
+    case 'ImageGeneration':
+      return 'image'
+    case 'VideoGeneration':
+      return 'video'
+    case 'Embedding':
+      return 'embeddings'
+    default:
+      return null
+  }
+}
+
+/**
+ * Last resort for an id the listing does not classify. Seedream and
+ * Seedance are the product names on `images/generations` and
+ * `contents/generations/tasks`; the docs name models by that token.
+ */
+function arkFamilyActivity(rawId: string): Activity | null {
+  const id = rawId.toLowerCase()
+  if (id.includes('seedream')) return 'image'
+  if (id.includes('seedance')) return 'video'
+  return null
+}
+
+function statedModalities(
+  value: Array<string> | undefined,
+): Array<string> | null {
+  return value && value.length > 0 ? value : null
+}
+
+/** Output the activity itself states when the listing and catalog omit it. */
+function defaultOutput(activity: Activity | null): Array<string> | null {
+  if (activity === 'image') return ['image']
+  if (activity === 'video') return ['video']
   return null
 }
 
@@ -466,7 +519,22 @@ export function arkChatCapabilities(m: ArkModel): Array<string> {
 
 function toModelInfo(m: ArkModel): ModelInfo {
   const probed = PROBED_STRUCTURED_OUTPUT[m.id]
-  const activity = arkTaskActivity(m.task_type)
+  const curated = CURATED_BY_ID.get(m.id)
+  // Listing task type, then the listing's domain, then the curated row for
+  // this exact id, then the Seedream/Seedance product token. A stated
+  // modality side wins; a blank side takes the curated list, and an image
+  // or video row still missing an output takes that activity's output.
+  const activity =
+    arkTaskActivity(m.task_type) ??
+    arkDomainActivity(m.domain) ??
+    curated?.activity ??
+    arkFamilyActivity(m.id)
+  const input =
+    statedModalities(m.modalities?.input_modalities) ?? curated?.input ?? null
+  const output =
+    statedModalities(m.modalities?.output_modalities) ??
+    curated?.output ??
+    defaultOutput(activity)
   return {
     rawId: m.id,
     displayName: m.name ?? null,
@@ -474,8 +542,8 @@ function toModelInfo(m: ArkModel): ModelInfo {
     contextWindow: m.token_limits?.context_window ?? null,
     maxOutput: m.token_limits?.max_output_token_length ?? null,
     modalities: {
-      input: m.modalities?.input_modalities,
-      output: m.modalities?.output_modalities,
+      ...(input ? { input } : {}),
+      ...(output ? { output } : {}),
     },
     ...(activity === 'chat'
       ? { capabilities: arkChatCapabilities(m) }
