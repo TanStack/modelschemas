@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchJson, fetchText } from './types.ts'
+import { fetchJson, fetchText, timeoutSignal } from './types.ts'
 
 const LISTING_URL = 'https://api.example.com/v1/models'
 
@@ -81,6 +81,29 @@ describe('fetch failure message', () => {
       new Error(
         `fetch failed: ${LISTING_URL} → 502 Bad Gateway: upstream stalled`,
       ),
+    )
+  })
+
+  it('names the url and the timeout budget when the fetch aborts', async () => {
+    const timeout = new DOMException(
+      'The operation was aborted due to timeout',
+      'TimeoutError',
+    )
+    const fetcher = () => Promise.reject(timeout)
+
+    await expect(
+      fetchText(LISTING_URL, { signal: timeoutSignal(20_000) }, fetcher),
+    ).rejects.toThrow(`fetch failed: ${LISTING_URL} → timeout after 20000ms`)
+    await expect(fetchJson(LISTING_URL, undefined, fetcher)).rejects.toThrow(
+      `fetch failed: ${LISTING_URL} → timeout`,
+    )
+  })
+
+  it('leaves a non-timeout rejection unchanged', async () => {
+    const fetcher = () => Promise.reject(new TypeError('getaddrinfo ENOTFOUND'))
+
+    await expect(fetchText(LISTING_URL, undefined, fetcher)).rejects.toThrow(
+      'getaddrinfo ENOTFOUND',
     )
   })
 })

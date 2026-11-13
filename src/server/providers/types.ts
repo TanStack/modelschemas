@@ -847,9 +847,53 @@ export async function fetchJson(
   init?: RequestInit,
   fetcher: Fetcher = fetch,
 ): Promise<unknown> {
-  const response = await fetcher(url, init)
+  const response = await fetchResponse(url, init, fetcher)
   if (!response.ok) throw await fetchFailure(url, response)
   return response.json()
+}
+
+const timeoutBudgets = new WeakMap<AbortSignal, number>()
+
+/**
+ * `AbortSignal.timeout` that remembers `ms`. A timed-out `fetchResponse`
+ * names that budget; the platform timer is unchanged.
+ */
+export function timeoutSignal(ms: number): AbortSignal {
+  const signal = AbortSignal.timeout(ms)
+  timeoutBudgets.set(signal, ms)
+  return signal
+}
+
+/**
+ * `fetch` that turns `AbortSignal` timeout into `fetch failed: <url> →
+ * timeout after <budget>ms`. Any other rejection is rethrown as-is.
+ * Does not retry.
+ */
+export async function fetchResponse(
+  url: string,
+  init?: RequestInit,
+  fetcher: Fetcher = fetch,
+): Promise<Response> {
+  try {
+    return await fetcher(url, init)
+  } catch (error) {
+    if (!isFetchTimeout(error)) throw error
+    const budget =
+      init?.signal == null ? undefined : timeoutBudgets.get(init.signal)
+    const after = budget === undefined ? '' : ` after ${String(budget)}ms`
+    throw new Error(`fetch failed: ${url} → timeout${after}`, { cause: error })
+  }
+}
+
+/** AbortSignal.timeout's DOMException, including a cross-realm throw. */
+function isFetchTimeout(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const name = 'name' in error ? error.name : undefined
+  const message = 'message' in error ? error.message : undefined
+  return (
+    name === 'TimeoutError' ||
+    (typeof message === 'string' && message.includes('aborted due to timeout'))
+  )
 }
 
 /**
@@ -911,7 +955,7 @@ export async function fetchText(
   init?: RequestInit,
   fetcher: Fetcher = fetch,
 ): Promise<string> {
-  const response = await fetcher(url, init)
+  const response = await fetchResponse(url, init, fetcher)
   if (!response.ok) throw await fetchFailure(url, response)
   return response.text()
 }
